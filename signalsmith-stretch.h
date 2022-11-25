@@ -19,10 +19,10 @@ struct SignalsmithStretch {
 	int intervalSamples() const {
 		return stft.interval();
 	}
-	int inputLatencySamples() const {
+	int inputLatency() const {
 		return stft.windowSize()/2;
 	}
-	int outputLatencySamples() const {
+	int outputLatency() const {
 		return stft.windowSize() - inputLatencySamples();
 	}
 	
