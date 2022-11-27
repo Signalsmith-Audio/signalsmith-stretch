@@ -1,9 +1,10 @@
-# Signalsmith Stretch: pitch/time library
+# Signalsmith Stretch: C++ pitch/time library
 
 This is a C++11 library for pitch and time stretching, using the final approach from the ADC22 presentation _Four Ways To Write A Pitch-Shifter_.
 
-## How to use it
+It's still a work-in-progress: the pitch-shifting is fine, but the time-stretching isn't finished.
 
+## How to use it
 
 ```cpp
 #include "signalsmith-stretch.h"
@@ -52,22 +53,6 @@ You can set a "tonality limit", which uses a non-linear frequency map to preserv
 ```cpp
 stretch.setTransposeSemitones(4, 8000/sampleRate);
 ```
-
-### Custom pitch map
-
-This stretcher does (fairly rough) peak-detection, and creates a non-linear frequency map based on that.
-
-You can hook into this to define your own pitch-map, by providing a callback which is called once per channel, for every FFT block:
-
-```cpp
-stretch.setMap([&](int channel) {
-	for (auto &peak : stretch.peaks) {
-		peak.output = peak.input*2; // up one octave
-	}
-});
-```
-
-The input/output frequencies are relative to Nyquist.  It's not currently-tested what happens if your map is non-monotonic.
 
 ## Compiling
 

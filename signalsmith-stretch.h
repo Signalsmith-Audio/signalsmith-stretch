@@ -5,7 +5,6 @@
 #include "dsp/delay.h"
 #include "dsp/curves.h"
 #include <vector>
-#include <functional>
 #include <algorithm>
 
 namespace signalsmith { namespace stretch {
@@ -23,7 +22,7 @@ struct SignalsmithStretch {
 		return stft.windowSize()/2;
 	}
 	int outputLatency() const {
-		return stft.windowSize() - inputLatencySamples();
+		return stft.windowSize() - inputLatency();
 	}
 	
 	void reset() {
@@ -41,8 +40,12 @@ struct SignalsmithStretch {
 		channelWeight = 0.5;
 	}
 
-	/// Manual setup
+	// manual parameters
 	Sample freqWeight = 1, timeWeight = 2, channelWeight = 0.5;
+	bool sortOrder = true; // Assemble output spectrum highest-magnitude first
+	Sample maxProportion = 0.75; // How much the strongest prediction overrides everything else
+
+	/// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
 		channels = nChannels;
 		stft.resize(channels, blockSamples, intervalSamples);
@@ -57,9 +60,11 @@ struct SignalsmithStretch {
 		timeShiftPhases(blockSamples*Sample(-0.5), rotCentreSpectrum);
 		timeShiftPhases(-intervalSamples, rotPrevOutput);
 		peaks.reserve(stft.bands());
+		energy.resize(stft.bands());
 		smoothedEnergy.resize(stft.bands());
-		inputBinMap.resize(stft.bands());
-		outputGainMap.resize(stft.bands());
+		outputMap.resize(stft.bands());
+		observationOrder.resize(channels*stft.bands());
+		maxEnergyChannel.resize(stft.bands());
 	}
 	
 	template<class Inputs, class Outputs>
@@ -143,24 +148,10 @@ struct SignalsmithStretch {
 	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
 		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
 	}
-
-	struct Peak {
-		Sample input, output, energy;
-		
-		bool operator< (const Peak &other) const {
-			return output < other.output;
-		}
-	};
-	std::vector<Peak> peaks;
-	/// This function is called once per channel, from inside `.process()`, so that you can alter the mapping in `.peaks`
-	void setMap(std::function<void(int)> freqMap) {
-		frequencyMapFn = freqMap;
-	}
 	
 private:
 	using Complex = std::complex<Sample>;
 	Sample freqMultiplier = 1, freqTonalityLimit = 0.5;
-	std::function<void(int)> frequencyMapFn;
 
 	signalsmith::spectral::STFT<Sample> stft{0, 1, 1};
 	signalsmith::delay::MultiBuffer<Sample> inputBuffer;
@@ -184,6 +175,7 @@ private:
 		Complex output, prevOutput{0};
 		Complex timeChange{0};
 		Sample energy, prevEnergy;
+		bool ready = false;
 	};
 	std::vector<Band> channelBands;
 	Band * bandsForChannel(int channel) {
@@ -203,6 +195,12 @@ private:
 		Complex high = getBand<member>(channel, lowIndex + 1);
 		return low + (high - low)*fractional;
 	}
+	template<Complex Band::*member>
+	Complex getFractional(int channel, Sample inputIndex) {
+		int lowIndex = std::floor(inputIndex);
+		Sample fracIndex = inputIndex - std::floor(inputIndex);
+		return getFractional<member>(channel, lowIndex, fracIndex);
+	}
 	template<Sample Band::*member>
 	Sample getBand(int channel, int index) {
 		if (index < 0) index = -1 - index;
@@ -215,9 +213,40 @@ private:
 		Sample high = getBand<member>(channel, lowIndex + 1);
 		return low + (high - low)*fractional;
 	}
+	template<Sample Band::*member>
+	Sample getFractional(int channel, Sample inputIndex) {
+		int lowIndex = std::floor(inputIndex);
+		Sample fracIndex = inputIndex - std::floor(inputIndex);
+		return getFractional<member>(channel, lowIndex, fracIndex);
+	}
 
-	Sample peakThreshold = 1;
-	std::vector<Sample> smoothedEnergy, inputBinMap, outputGainMap;
+	struct Peak {
+		Sample input, output, energy;
+		
+		bool operator< (const Peak &other) const {
+			return output < other.output;
+		}
+	};
+	std::vector<Peak> peaks;
+	std::vector<Sample> energy, smoothedEnergy;
+	struct PitchMapPoint {
+		Sample inputBin, freqGrad;
+	};
+	std::vector<PitchMapPoint> outputMap;
+	
+	struct OrderPoint {
+		int channel, outputBand;
+		Sample inputIndex;
+		Sample energy;
+		Complex input;
+		
+		// For sorting in descending order
+		bool operator<(const OrderPoint &other) const {
+			return other.energy < energy;
+		}
+	};
+	std::vector<OrderPoint> observationOrder;
+	std::vector<int> maxEnergyChannel;
 
 	void processSpectrum(int inputInterval) {
 		int outputInterval = stft.interval();
@@ -237,69 +266,130 @@ private:
 		}
 
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
-		Band *bins0 = bandsForChannel(0);
+		findPeaks(smoothingBins);
+		updateOutputMap(smoothingBins);
+
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
-
-			findPeaks(bins, smoothingBins);
-			if (frequencyMapFn) frequencyMapFn(c);
-	
-			// Scale so they map bins, not frequency
-			for (auto &p : peaks) {
-				p.input *= stft.fftSize();
-				p.output *= stft.fftSize();
-			}
-			// Create the input/output bin map
-			updateBinMap(smoothingBins);
-			
+			auto *order = observationOrder.data() + c*stft.bands();
 			for (int b = 0; b < stft.bands(); ++b) {
-				Sample inputIndex = inputBinMap[b];
-				int lowIndex = std::floor(inputIndex);
-				Sample fracIndex = inputIndex - std::floor(inputIndex);
+				auto mapPoint = outputMap[b];
+				int lowIndex = std::floor(mapPoint.inputBin);
+				Sample fracIndex = mapPoint.inputBin - std::floor(mapPoint.inputBin);
+
 				Sample outputEnergy = getFractional<&Band::energy>(c, lowIndex, fracIndex);
-				
-				Band &outputBin = bins[b];
 				Complex input = getFractional<&Band::input>(c, lowIndex, fracIndex);
-				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
-				Complex timeChange = input*std::conj(prevInput);
 
-				Complex prediction = outputBin.prevOutput*timeChange*freqWeight;
-
-				if (b > 0) {
-					Sample downIndex = inputIndex - rate;
-					int downLowIndex = std::floor(downIndex);
-					Sample fracDownIndex = downIndex - std::floor(downIndex);
-					Complex downInput = getFractional<&Band::input>(c, downLowIndex, fracDownIndex);
-					Complex freqChange = input*std::conj(downInput);
-					Complex outputDown = bins[b - 1].output;
-					prediction += outputDown*freqChange*timeWeight;
-				}
-				int longStep = std::round(smoothingBins);
-				if (b > longStep) {
-					Sample downIndex = inputIndex - longStep*rate;
-					int downLowIndex = std::floor(downIndex);
-					Sample fracDownIndex = downIndex - std::floor(downIndex);
-					Complex downInput = getFractional<&Band::input>(c, downLowIndex, fracDownIndex);
-					Complex freqChange = input*std::conj(downInput);
-					Complex outputDown = bins[b - longStep].output;
-					prediction += outputDown*freqChange*timeWeight;
-				}
+				outputEnergy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
+				order[b] = {c, b, mapPoint.inputBin, outputEnergy, input};
 				
-				if (c > 0) {
-					Complex ch0Input = getFractional<&Band::input>(0, lowIndex, fracIndex);
-					Complex ch0Output = bins0[b].output;
-					Complex channelRot = input*std::conj(ch0Input);
-					prediction += ch0Output*channelRot*channelWeight;
-				}
-				
-				Sample predictionNorm = std::norm(prediction);
-				if (predictionNorm > 1e-15) {
-					outputBin.output = prediction*std::sqrt(outputEnergy/predictionNorm);
-				} else {
-					outputBin.output = input;
-				}
-				outputBin.output *= outputGainMap[b];
+				bins[b].ready = false;
 			}
+		}
+		if (sortOrder) std::sort(observationOrder.begin(), observationOrder.end());
+
+		for (auto &c : maxEnergyChannel) c = -1;
+		for (auto &ordered : observationOrder) {
+			auto *bins = bandsForChannel(ordered.channel);
+			auto &outputBin = bins[ordered.outputBand];
+
+			int lowIndex = std::floor(ordered.inputIndex);
+			Sample fracIndex = ordered.inputIndex - std::floor(ordered.inputIndex);
+
+			// We always have the phase-vocoder prediction
+			Complex prevInput = getFractional<&Band::prevInput>(ordered.channel, lowIndex, fracIndex);
+			Complex timeChange = ordered.input*std::conj(prevInput);
+			Complex prediction = outputBin.prevOutput*timeChange*freqWeight;
+			
+			// Track the strongest prediction
+			Complex maxPrediction = prediction;
+			Sample maxPredictionNorm = std::norm(maxPrediction);
+
+			// vertical upwards, if it exists
+			if (ordered.outputBand > 0) {
+				auto &outputDownBin = bins[ordered.outputBand - 1];
+				if (outputDownBin.ready) {
+					Complex downInput = getFractional<&Band::input>(ordered.channel, ordered.inputIndex - rate);
+					Complex freqChange = ordered.input*std::conj(downInput);
+					Complex newPrediction = outputDownBin.output*freqChange*timeWeight;
+					prediction += newPrediction;
+					if (std::norm(newPrediction) > maxPredictionNorm) {
+						maxPredictionNorm = std::norm(newPrediction);
+						maxPrediction = newPrediction;
+					}
+				}
+			}
+			// vertical downwards, if it exists
+			if (ordered.outputBand < stft.bands() - 1) {
+				auto &outputDownBin = bins[ordered.outputBand + 1];
+				if (outputDownBin.ready) {
+					Complex downInput = getFractional<&Band::input>(ordered.channel, ordered.inputIndex + rate);
+					Complex freqChange = ordered.input*std::conj(downInput);
+					Complex newPrediction = outputDownBin.output*freqChange*timeWeight;
+					prediction += newPrediction;
+					if (std::norm(newPrediction) > maxPredictionNorm) {
+						maxPredictionNorm = std::norm(newPrediction);
+						maxPrediction = newPrediction;
+					}
+				}
+			}
+			// longer verticals
+			int longStep = std::round(smoothingBins);
+			if (ordered.outputBand > longStep) {
+				auto &outputDownBin = bins[ordered.outputBand - longStep];
+				if (outputDownBin.ready) {
+					Complex downInput = getFractional<&Band::input>(ordered.channel, ordered.inputIndex - longStep*rate);
+					Complex freqChange = ordered.input*std::conj(downInput);
+					Complex newPrediction = outputDownBin.output*freqChange*timeWeight;
+					prediction += newPrediction;
+					if (std::norm(newPrediction) > maxPredictionNorm) {
+						maxPredictionNorm = std::norm(newPrediction);
+						maxPrediction = newPrediction;
+					}
+				}
+			}
+			if (ordered.outputBand < stft.bands() - longStep) {
+				auto &outputDownBin = bins[ordered.outputBand + longStep];
+				if (outputDownBin.ready) {
+					Complex downInput = getFractional<&Band::input>(ordered.channel, ordered.inputIndex + longStep*rate);
+					Complex freqChange = ordered.input*std::conj(downInput);
+					Complex newPrediction = outputDownBin.output*freqChange*timeWeight;
+					prediction += newPrediction;
+					if (std::norm(newPrediction) > maxPredictionNorm) {
+						maxPredictionNorm = std::norm(newPrediction);
+						maxPrediction = newPrediction;
+					}
+				}
+			}
+			
+			// Inter-channel prediction, if it exists
+			int &maxChannel = maxEnergyChannel[ordered.outputBand];
+			if (maxChannel >= 0) {
+				Complex otherInput = getFractional<&Band::input>(maxChannel, lowIndex, fracIndex);
+				Complex channelRot = ordered.input*std::conj(otherInput);
+
+				auto *otherBins = bandsForChannel(maxChannel);
+				Complex otherOutputOutput = otherBins[ordered.outputBand].output;
+				Complex newPrediction = otherOutputOutput*channelRot*channelWeight;
+				prediction += newPrediction;
+				if (std::norm(newPrediction) > maxPredictionNorm) {
+					maxPredictionNorm = std::norm(newPrediction);
+					maxPrediction = newPrediction;
+				}
+			} else {
+				maxChannel = ordered.channel;
+			}
+			
+			prediction += (maxPrediction - prediction)*maxProportion;
+			
+			Sample predictionNorm = std::norm(prediction);
+			if (predictionNorm > 1e-15) {
+				outputBin.output = prediction*std::sqrt(ordered.energy/predictionNorm);
+			} else {
+				outputBin.output = ordered.input;
+			}
+
+			outputBin.ready = true;
 		}
 
 		for (auto &bin : channelBands) {
@@ -309,23 +399,28 @@ private:
 		}
 	}
 	
-	void smoothEnergy(Band *bins, Sample smoothingBins) {
+	// Produces smoothed energy across all channels
+	void smoothEnergy(Sample smoothingBins) {
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
+		for (auto &e : energy) e = 0;
+		for (int c = 0; c < channels; ++c) {
+			Band *bins = bandsForChannel(c);
+			for (int b = 0; b < stft.bands(); ++b) {
+				Sample e = std::norm(bins[b].input);
+				bins[b].energy = e;
+				energy[b] += e;
+			}
+		}
 		for (int b = 0; b < stft.bands(); ++b) {
-			auto &bin = bins[b];
-			Sample e = std::norm(bin.input);
-			bin.energy = e;
-			smoothedEnergy[b] = e*peakThreshold;
+			smoothedEnergy[b] = energy[b];
 		}
 		Sample e = 0;
 		for (int repeat = 0; repeat < 2; ++repeat) {
 			for (int b = stft.bands() - 1; b >= 0; --b) {
-				auto &bin = bins[b];
 				e += (smoothedEnergy[b] - e)*smoothingSlew;
 				smoothedEnergy[b] = e;
 			}
 			for (int b = 0; b < stft.bands(); ++b) {
-				auto &bin = bins[b];
 				e += (smoothedEnergy[b] - e)*smoothingSlew;
 				smoothedEnergy[b] = e;
 			}
@@ -340,70 +435,66 @@ private:
 		return freq*freqMultiplier;
 	}
 	
-	void findPeaks(Band *bins, Sample smoothingBins) {
-		smoothEnergy(bins, smoothingBins);
+	// Identifies spectral peaks using energy across all channels
+	void findPeaks(Sample smoothingBins) {
+		smoothEnergy(smoothingBins);
 
 		peaks.resize(0);
-		// Artificial peak at 0
-		peaks.emplace_back(Peak{0, 0, 0});
 		
 		int start = 0;
 		while (start < stft.bands()) {
-			if (bins[start].energy > smoothedEnergy[start]) {
+			if (energy[start] > smoothedEnergy[start]) {
 				int end = start + 1;
-				while (end < stft.bands() && bins[end].energy > smoothedEnergy[end]) {
+				while (end < stft.bands() && energy[end] > smoothedEnergy[end]) {
 					++end;
 				}
 				// Take the average frequency and energy across the peak range
 				Sample freqSum = 0, energySum = 0;
 				for (int b = start; b < end; ++b) {
-					Sample e = bins[b].energy;
+					Sample e = energy[b];
 					freqSum += (b + 0.5)*e;
 					energySum += e;
 				}
 				Sample avgFreq = freqSum/(stft.fftSize()*energySum);
 				Sample avgEnergy = energySum/(end - start);
-				peaks.emplace_back(Peak{avgFreq, defaultFreqMap(avgFreq), avgEnergy});
+				peaks.emplace_back(Peak{avgFreq*stft.fftSize(), defaultFreqMap(avgFreq)*stft.fftSize(), avgEnergy});
 
 				start = end;
 			}
 			++start;
 		}
-		// Artificial peak at Nyquist
-		peaks.emplace_back(Peak{0.5, defaultFreqMap(freqMultiplier), 0});
 	}
 	
-	void updateBinMap(Sample peakWidthBins) {
-		std::stable_sort(peaks.begin(), peaks.end());
+	void updateOutputMap(Sample peakWidthBins) {
 		Sample linearZoneBins = peakWidthBins*Sample(0.5);
-		for (auto &g : outputGainMap) g = 1; // reset gains
+		Sample bottomOffset = peaks[0].input - peaks[0].output;
 		for (int b = 0; b < std::min<int>(stft.bands(), peaks[0].output); ++b) {
-			inputBinMap[b] = peaks[0].input;
-			outputGainMap[b] = 0;
+			outputMap[b] = {b + bottomOffset, 1};
 		}
 		for (size_t p = 1; p < peaks.size(); ++p) {
 			const Peak &prev = peaks[p - 1], &next = peaks[p];
 			Sample prevEnd = prev.output + linearZoneBins;
 			Sample nextStart = next.output - linearZoneBins;
-			signalsmith::curves::Linear<Sample> segment(prevEnd, nextStart, prev.input + linearZoneBins, next.input - linearZoneBins);
-
 			if (nextStart < prevEnd) nextStart = prevEnd = (nextStart + prevEnd)*Sample(0.5);
+			signalsmith::curves::Linear<Sample> segment(prevEnd, nextStart, prev.input + linearZoneBins, next.input - linearZoneBins);
+			Sample segmentGrad = ((prev.input + linearZoneBins) - (next.input - linearZoneBins))/(prevEnd - nextStart + Sample(1e-10));
+
 			prevEnd = std::max<Sample>(0, std::min<Sample>(stft.bands(), prevEnd));
 			nextStart = std::max<Sample>(0, std::min<Sample>(stft.bands(), nextStart));
 
 			for (int b = std::max<int>(0, std::ceil(prev.output)); b < prevEnd; ++b) {
-				inputBinMap[b] = b + prev.input - prev.output;
+				outputMap[b] = {b + prev.input - prev.output, 1};
 			}
 			for (int b = std::ceil(prevEnd); b < nextStart; ++b) {
-				inputBinMap[b] = segment(b);
+				outputMap[b] = {segment(b), segmentGrad};
 			}
 			for (int b = std::ceil(nextStart); b < std::min<int>(stft.bands(), std::ceil(next.output)); ++b) {
-				inputBinMap[b] = b + next.input - next.output;
+				outputMap[b] = {b + next.input - next.output, 1};
 			}
 		}
+		Sample topOffset = peaks.back().input - peaks.back().output;
 		for (int b = std::max<int>(0, peaks.back().output); b < stft.bands(); ++b) {
-			inputBinMap[b] = peaks.back().input;
-			outputGainMap[b] = 0;
+			outputMap[b] = {b + topOffset, 1};
 		}
 	}
 };
