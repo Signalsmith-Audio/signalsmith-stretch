@@ -40,6 +40,9 @@ struct SignalsmithStretch {
 	void presetDefault(int nChannels, Sample sampleRate) {
 		configure(nChannels, sampleRate*0.12, sampleRate*0.03);
 	}
+	void presetCheaper(int nChannels, Sample sampleRate) {
+		configure(nChannels, sampleRate*0.1, sampleRate*0.04);
+	}
 
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples) {

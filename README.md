@@ -14,10 +14,11 @@ signalsmith::stretch::SignalsmithStretch<float> stretch;
 
 ### Configuring
 
-The easiest way to configure is `.presetDefault()`:
+The easiest way to configure is a `.preset???()` method:
 
 ```cpp
 stretch.presetDefault(channels, sampleRate);
+stretch.presetCheaper(channels, sampleRate);
 ```
 
 If you want to test out different block-sizes etc. then you can use `.configure()` manually.
