@@ -2,7 +2,7 @@
 
 This is a C++11 library for pitch and time stretching, using the final approach from the ADC22 presentation _Four Ways To Write A Pitch-Shifter_.
 
-It's still a work-in-progress: the pitch-shifting is fine, but the time-stretching isn't finished.
+It can handle a wide-range of pitch-shifts (multiple octaves) but time-stretching sounds best for more modest changes (between 0.5x and 2x).
 
 ## How to use it
 
@@ -20,7 +20,7 @@ The easiest way to configure is `.presetDefault()`:
 stretch.presetDefault(channels, sampleRate);
 ```
 
-If you want to test out different block-sizes etc. then you can use `.configure()` manually, and even change `.freqWeight`/`.timeWeight`/`.channelWeight`.
+If you want to test out different block-sizes etc. then you can use `.configure()` manually.
 
 ### Processing (and resetting)
 
@@ -52,6 +52,14 @@ You can set a "tonality limit", which uses a non-linear frequency map to preserv
 
 ```cpp
 stretch.setTransposeSemitones(4, 8000/sampleRate);
+```
+
+Alternatively, you can set a custom frequency map, mapping input frequencies to output frequencies (both normalised against the sample-rate): 
+
+```cpp
+stretch.setFreqMap([](float inputFreq) {
+	return inputFreq*2; // up one octave
+});
 ```
 
 ## Compiling

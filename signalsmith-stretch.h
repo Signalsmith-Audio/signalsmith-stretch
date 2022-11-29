@@ -4,8 +4,10 @@
 #include "dsp/spectral.h"
 #include "dsp/delay.h"
 #include "dsp/curves.h"
+SIGNALSMITH_DSP_VERSION_CHECK(1, 3, 3); // Check version is compatible
 #include <vector>
 #include <algorithm>
+#include <functional>
 
 namespace signalsmith { namespace stretch {
 
@@ -30,14 +32,15 @@ struct SignalsmithStretch {
 		inputBuffer.reset();
 		prevInputOffset = -1;
 		channelBands.assign(channelBands.size(), Band());
+		silenceCounter = 2*stft.windowSize();
 	}
 
-	/// Configures using a default preset
+	// Configures using a default preset
 	void presetDefault(int nChannels, Sample sampleRate) {
 		configure(nChannels, sampleRate*0.12, sampleRate*0.03);
 	}
 
-	/// Manual setup
+	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
 		channels = nChannels;
 		stft.resize(channels, blockSamples, intervalSamples);
@@ -61,7 +64,59 @@ struct SignalsmithStretch {
 	
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
-		Sample timeScaling = Sample(inputSamples)/outputSamples;
+		Sample totalEnergy = 0;
+		for (int c = 0; c < channels; ++c) {
+			auto &&inputChannel = inputs[c];
+			for (int i = 0; i < inputSamples; ++i) {
+				Sample s = inputChannel[i];
+				totalEnergy += s*s;
+			}
+		}
+		if (totalEnergy < noiseFloor) {
+			if (silenceCounter >= 2*stft.windowSize()) {
+				if (silenceFirst) {
+					silenceFirst = false;
+					for (auto &b : channelBands) {
+						b.input = b.prevInput = b.output = b.prevOutput = 0;
+						b.inputEnergy = 0;
+					}
+				}
+			
+				if (inputSamples > 0) {
+					// copy from the input, wrapping around if needed
+					for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
+						int inputIndex = outputIndex%inputSamples;
+						for (int c = 0; c < channels; ++c) {
+							outputs[c][outputIndex] = inputs[c][inputIndex];
+						}
+					}
+				} else {
+					for (int c = 0; c < channels; ++c) {
+						auto &&outputChannel = outputs[c];
+						for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
+							outputChannel[outputIndex] = 0;
+						}
+					}
+				}
+
+				// Store input in history buffer
+				for (int c = 0; c < channels; ++c) {
+					auto &&inputChannel = inputs[c];
+					auto &&bufferChannel = inputBuffer[c];
+					int startIndex = std::max<int>(0, inputSamples - stft.windowSize());
+					for (int i = startIndex; i < inputSamples; ++i) {
+						bufferChannel[i] = inputChannel[i];
+					}
+				}
+				inputBuffer += inputSamples;
+				return;
+			} else {
+				silenceCounter += inputSamples;
+			}
+		} else {
+			silenceCounter = 0;
+			silenceFirst = true;
+		}
 
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
 			stft.ensureValid(outputIndex, [&](int outputOffset) {
@@ -83,7 +138,6 @@ struct SignalsmithStretch {
 						for (int i = std::max<int>(0, -inputOffset); i < stft.windowSize(); ++i) {
 							timeBuffer[i] = inputChannel[i + inputOffset];
 						}
-		
 						stft.analyse(c, timeBuffer);
 					}
 				}
@@ -111,6 +165,9 @@ struct SignalsmithStretch {
 				auto &&outputChannel = outputs[c];
 				auto &&stftChannel = stft[c];
 				outputChannel[outputIndex] = stftChannel[outputIndex];
+				
+				// Debug:
+				outputChannel[outputIndex] *= -1;
 			}
 		}
 
@@ -136,14 +193,25 @@ struct SignalsmithStretch {
 		} else {
 			freqTonalityLimit = 1;
 		}
+		customFreqMap = nullptr;
 	}
 	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
 		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
+		customFreqMap = nullptr;
+	}
+	// Sets a custom frequency map - should be monotonically increasing
+	void setFreqMap(std::function<Sample(Sample)> inputToOutput) {
+		customFreqMap = inputToOutput;
 	}
 	
 private:
+	static constexpr Sample noiseFloor{1e-15};
+	int silenceCounter = 0;
+	bool silenceFirst = true;
+
 	using Complex = std::complex<Sample>;
 	Sample freqMultiplier = 1, freqTonalityLimit = 0.5;
+	std::function<Sample(Sample)> customFreqMap = nullptr;
 
 	signalsmith::spectral::STFT<Sample> stft{0, 1, 1};
 	signalsmith::delay::MultiBuffer<Sample> inputBuffer;
@@ -211,7 +279,7 @@ private:
 	}
 
 	struct Peak {
-		Sample input, output, energy;
+		Sample input, output;
 		
 		bool operator< (const Peak &other) const {
 			return output < other.output;
@@ -241,14 +309,15 @@ private:
 		int bands = stft.bands();
 		
 		Sample rate = outputInterval/std::max<Sample>(1, inputInterval);
+		rate = std::min<Sample>(2, rate); // For now, limit the intra-block time stretching to 2x
 		
 		if (inputInterval > 0) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
 				for (int b = 0; b < stft.bands(); ++b) {
 					auto &bin = bins[b];
-					bins[b].prevOutput *= rotPrevOutput[b];
-					bins[b].prevInput *= rotPrevInput[b];
+					bin.prevOutput *= rotPrevOutput[b];
+					bin.prevInput *= rotPrevInput[b];
 				}
 			}
 		}
@@ -295,7 +364,7 @@ private:
 				predictions[b] = prediction;
 
 				// Rough output prediction based on phase-vocoder, sensitive to previous input/output magnitude
-				outputBin.output = prediction.freqPrediction/(prediction.energy + Sample(1e-10));
+				outputBin.output = prediction.freqPrediction/(prediction.energy + noiseFloor);
 			}
 		}
 		for (int b = 0; b < stft.bands(); ++b) {
@@ -340,7 +409,7 @@ private:
 			}
 
 			Sample phaseNorm = std::norm(phase);
-			if (phaseNorm > 1e-15) {
+			if (phaseNorm > noiseFloor) {
 				outputBin.output = phase*std::sqrt(prediction.energy/phaseNorm);
 			} else {
 				outputBin.output = prediction.input;
@@ -352,12 +421,12 @@ private:
 					auto &channelBin = bandsForChannel(c)[b];
 					auto &channelPrediction = predictionsForChannel(c)[b];
 					
-					Complex channelTwist = prediction.input*std::conj(channelPrediction.input);
+					Complex channelTwist = channelPrediction.input*std::conj(prediction.input);
 					Complex channelPhase = outputBin.output*channelTwist;
 					
 					Sample channelPhaseNorm = std::norm(channelPhase);
-					if (channelPhaseNorm > 1e-15) {
-						channelBin.output = channelPhase*std::sqrt(prediction.energy/channelPhaseNorm);
+					if (channelPhaseNorm > noiseFloor) {
+						channelBin.output = channelPhase*std::sqrt(channelPrediction.energy/channelPhaseNorm);
 					} else {
 						channelBin.output = channelPrediction.input;
 					}
@@ -365,9 +434,13 @@ private:
 			}
 		}
 
-		for (auto &bin : channelBands) {
-			bin.prevOutput = bin.output;
-			bin.prevInput = bin.input;
+		if (inputInterval > 0) {
+			for (auto &bin : channelBands) {
+				bin.prevOutput = bin.output;
+				bin.prevInput = bin.input;
+			}
+		} else {
+			for (auto &bin : channelBands) bin.prevOutput = bin.output;
 		}
 	}
 	
@@ -399,7 +472,8 @@ private:
 		}
 	}
 	
-	Sample defaultFreqMap(Sample freq) const {
+	Sample mapFreq(Sample freq) const {
+		if (customFreqMap) return customFreqMap(freq);
 		if (freq > freqTonalityLimit) {
 			Sample diff = freq - freqTonalityLimit;
 			return freqTonalityLimit*freqMultiplier + diff;
@@ -429,7 +503,7 @@ private:
 				}
 				Sample avgFreq = freqSum/(stft.fftSize()*energySum);
 				Sample avgEnergy = energySum/(end - start);
-				peaks.emplace_back(Peak{avgFreq*stft.fftSize(), defaultFreqMap(avgFreq)*stft.fftSize(), avgEnergy});
+				peaks.emplace_back(Peak{avgFreq*stft.fftSize(), mapFreq(avgFreq)*stft.fftSize()});
 
 				start = end;
 			}
@@ -438,6 +512,12 @@ private:
 	}
 	
 	void updateOutputMap(Sample peakWidthBins) {
+		if (peaks.empty()) {
+			for (int b = 0; b < stft.bands(); ++b) {
+				outputMap[b] = {Sample(b), 1};
+			}
+			return;
+		}
 		Sample linearZoneBins = peakWidthBins*Sample(0.5);
 		Sample bottomOffset = peaks[0].input - peaks[0].output;
 		for (int b = 0; b < std::min<int>(stft.bands(), peaks[0].output); ++b) {
@@ -449,7 +529,7 @@ private:
 			Sample nextStart = next.output - linearZoneBins;
 			if (nextStart < prevEnd) nextStart = prevEnd = (nextStart + prevEnd)*Sample(0.5);
 			signalsmith::curves::Linear<Sample> segment(prevEnd, nextStart, prev.input + linearZoneBins, next.input - linearZoneBins);
-			Sample segmentGrad = ((prev.input + linearZoneBins) - (next.input - linearZoneBins))/(prevEnd - nextStart + Sample(1e-10));
+			Sample segmentGrad = ((prev.input + linearZoneBins) - (next.input - linearZoneBins))/(prevEnd - nextStart + noiseFloor);
 
 			prevEnd = std::max<Sample>(0, std::min<Sample>(stft.bands(), prevEnd));
 			nextStart = std::max<Sample>(0, std::min<Sample>(stft.bands(), nextStart));
