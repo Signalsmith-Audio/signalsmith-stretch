@@ -126,7 +126,7 @@ struct SignalsmithStretch {
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
 			stft.ensureValid(outputIndex, [&](int outputOffset) {
 				// Time to process a spectrum!  Where should it come from in the input?
-				int inputOffset = (outputOffset*inputSamples)/outputSamples - stft.windowSize();
+				int inputOffset = std::round(outputOffset*Sample(inputSamples)/outputSamples) - stft.windowSize();
 				int inputInterval = inputOffset - prevInputOffset;
 				prevInputOffset = inputOffset;
 

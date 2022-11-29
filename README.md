@@ -2,7 +2,7 @@
 
 This is a C++11 library for pitch and time stretching, using the final approach from the ADC22 presentation _Four Ways To Write A Pitch-Shifter_.
 
-It can handle a wide-range of pitch-shifts (multiple octaves) but time-stretching sounds best for more modest changes (between 0.5x and 2x).
+It can handle a wide-range of pitch-shifts (multiple octaves) but time-stretching sounds best for more modest changes (between 0.75x and 1.5x).  There are some audio examples on the [main project page](https://signalsmith-audio.co.uk/code/stretch/).
 
 ## How to use it
 
