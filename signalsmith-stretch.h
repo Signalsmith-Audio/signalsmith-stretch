@@ -35,12 +35,7 @@ struct SignalsmithStretch {
 	/// Configures using a default preset
 	void presetDefault(int nChannels, Sample sampleRate) {
 		configure(nChannels, sampleRate*0.12, sampleRate*0.03);
-		freqWeight = 1;
-		timeWeight = 2;
 	}
-
-	// manual parameters
-	Sample freqWeight = 1, timeWeight = 2, maxWeight = 2;
 
 	/// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
@@ -245,7 +240,7 @@ private:
 		int outputInterval = stft.interval();
 		int bands = stft.bands();
 		
-		Sample rate = Sample(inputInterval)/outputInterval;
+		Sample rate = outputInterval/std::max<Sample>(1, inputInterval);
 		
 		if (inputInterval > 0) {
 			for (int c = 0; c < channels; ++c) {
@@ -321,55 +316,29 @@ private:
 			auto &outputBin = bins[b];
 			auto mapPoint = outputMap[b];
 
-			Complex phase = prediction.freqPrediction*freqWeight;
-
-			// Track the strongest prediction
-			Complex maxPrediction = prediction.freqPrediction;
-			Sample maxPredictionNorm = std::norm(maxPrediction);
+			Complex phase = 0;
 
 			// Short steps
 			if (b > 0) {
 				auto &otherBin = bins[b - 1];
-				Complex newPrediction = otherBin.output*prediction.shortVerticalTwist;
-				phase += newPrediction*timeWeight;
-				if (std::norm(newPrediction) > maxPredictionNorm) {
-					maxPredictionNorm = std::norm(newPrediction);
-					maxPrediction = newPrediction;
-				}
+				phase += otherBin.output*prediction.shortVerticalTwist;
 			}
 			if (b < stft.bands() - 1) {
 				auto &otherBin = bins[b + 1];
 				auto &otherPrediction = predictions[b + 1];
-				Complex newPrediction = otherBin.output*std::conj(otherPrediction.shortVerticalTwist);
-				phase += newPrediction*timeWeight;
-				if (std::norm(newPrediction) > maxPredictionNorm) {
-					maxPredictionNorm = std::norm(newPrediction);
-					maxPrediction = newPrediction;
-				}
+				phase += otherBin.output*std::conj(otherPrediction.shortVerticalTwist);
 			}
 			// longer verticals
 			if (b > longVerticalStep) {
 				auto &otherBin = bins[b - longVerticalStep];
-				Complex newPrediction = otherBin.output*prediction.longVerticalTwist;
-				phase += newPrediction*timeWeight;
-				if (std::norm(newPrediction) > maxPredictionNorm) {
-					maxPredictionNorm = std::norm(newPrediction);
-					maxPrediction = newPrediction;
-				}
+				phase += otherBin.output*prediction.longVerticalTwist;
 			}
 			if (b < stft.bands() - longVerticalStep) {
 				auto &otherBin = bins[b + longVerticalStep];
 				auto &otherPrediction = predictions[b + longVerticalStep];
-				Complex newPrediction = otherBin.output*std::conj(otherPrediction.longVerticalTwist);
-				phase += newPrediction*timeWeight;
-				if (std::norm(newPrediction) > maxPredictionNorm) {
-					maxPredictionNorm = std::norm(newPrediction);
-					maxPrediction = newPrediction;
-				}
+				phase += otherBin.output*std::conj(otherPrediction.longVerticalTwist);
 			}
 
-			phase += maxPrediction*maxWeight;
-			
 			Sample phaseNorm = std::norm(phase);
 			if (phaseNorm > 1e-15) {
 				outputBin.output = phase*std::sqrt(prediction.energy/phaseNorm);
