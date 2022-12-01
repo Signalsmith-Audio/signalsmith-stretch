@@ -524,30 +524,28 @@ private:
 			}
 			return;
 		}
-		Sample linearZoneBins = peakWidthBins*Sample(0.5);
 		Sample bottomOffset = peaks[0].input - peaks[0].output;
-		for (int b = 0; b < std::min<int>(stft.bands(), peaks[0].output); ++b) {
+		for (int b = 0; b < std::min<int>(stft.bands(), std::ceil(peaks[0].output)); ++b) {
 			outputMap[b] = {b + bottomOffset, 1};
 		}
+		// Interpolate between points
 		for (size_t p = 1; p < peaks.size(); ++p) {
 			const Peak &prev = peaks[p - 1], &next = peaks[p];
-			Sample prevEnd = prev.output + linearZoneBins;
-			Sample nextStart = next.output - linearZoneBins;
-			if (nextStart < prevEnd) nextStart = prevEnd = (nextStart + prevEnd)*Sample(0.5);
-			signalsmith::curves::Linear<Sample> segment(prevEnd, nextStart, prev.input + linearZoneBins, next.input - linearZoneBins);
-			Sample segmentGrad = ((prev.input + linearZoneBins) - (next.input - linearZoneBins))/(prevEnd - nextStart + noiseFloor);
-
-			prevEnd = std::max<Sample>(0, std::min<Sample>(stft.bands(), prevEnd));
-			nextStart = std::max<Sample>(0, std::min<Sample>(stft.bands(), nextStart));
-
-			for (int b = std::max<int>(0, std::ceil(prev.output)); b < prevEnd; ++b) {
-				outputMap[b] = {b + prev.input - prev.output, 1};
-			}
-			for (int b = std::ceil(prevEnd); b < nextStart; ++b) {
-				outputMap[b] = {segment(b), segmentGrad};
-			}
-			for (int b = std::ceil(nextStart); b < std::min<int>(stft.bands(), std::ceil(next.output)); ++b) {
-				outputMap[b] = {b + next.input - next.output, 1};
+			Sample rangeScale = 1/(next.output - prev.output);
+			Sample outOffset = prev.input - prev.output;
+			Sample outScale = next.input - next.output - prev.input + prev.output;
+			Sample gradScale = outScale*rangeScale;
+			int startBin = std::max<int>(0, std::ceil(prev.output));
+			int endBin = std::min<int>(stft.bands(), std::ceil(next.output));
+			for (int b = startBin; b < endBin; ++b) {
+				Sample r = (b - prev.output)*rangeScale;
+				Sample h = r*r*(3 - 2*r);
+				Sample outB = b + outOffset + h*outScale;
+				
+				Sample gradH = 6*r*(1 - r);
+				Sample gradB = 1 + gradH*gradScale;
+				
+				outputMap[b] = {outB, gradB};
 			}
 		}
 		Sample topOffset = peaks.back().input - peaks.back().output;
