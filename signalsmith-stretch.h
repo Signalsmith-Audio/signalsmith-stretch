@@ -3,7 +3,6 @@
 
 #include "dsp/spectral.h"
 #include "dsp/delay.h"
-#include "dsp/curves.h"
 #include "dsp/perf.h"
 SIGNALSMITH_DSP_VERSION_CHECK(1, 3, 3); // Check version is compatible
 #include <vector>
