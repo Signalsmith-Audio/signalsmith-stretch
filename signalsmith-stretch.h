@@ -47,17 +47,15 @@ struct SignalsmithStretch {
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
 		channels = nChannels;
 		stft.resize(channels, blockSamples, intervalSamples);
-		inputBuffer.resize(channels, blockSamples);
+		inputBuffer.resize(channels, blockSamples + intervalSamples + 1);
 		timeBuffer.assign(stft.fftSize(), 0);
 		channelBands.assign(stft.bands()*channels, Band());
 		
 		// Various phase rotations
 		rotCentreSpectrum.resize(stft.bands());
-		rotPrevInput.assign(stft.bands(), 0);
-		rotPrevInputShift = -1;
-		rotPrevOutput.resize(stft.bands());
+		rotPrevInterval.assign(stft.bands(), 0);
 		timeShiftPhases(blockSamples*Sample(-0.5), rotCentreSpectrum);
-		timeShiftPhases(-intervalSamples, rotPrevOutput);
+		timeShiftPhases(-intervalSamples, rotPrevInterval);
 		peaks.reserve(stft.bands());
 		energy.resize(stft.bands());
 		smoothedEnergy.resize(stft.bands());
@@ -129,11 +127,8 @@ struct SignalsmithStretch {
 				int inputInterval = inputOffset - prevInputOffset;
 				prevInputOffset = inputOffset;
 
-				if (inputInterval > 0) {
-					if (inputInterval != rotPrevInputShift) { // Only recompute if needed
-						timeShiftPhases(-inputInterval, rotPrevInput);
-						rotPrevInputShift = inputInterval;
-					}
+				bool newSpectrum = (inputInterval > 0);
+				if (newSpectrum) {
 					for (int c = 0; c < channels; ++c) {
 						// Copy from the history buffer, if needed
 						auto &&bufferChannel = inputBuffer[c];
@@ -147,17 +142,42 @@ struct SignalsmithStretch {
 						}
 						stft.analyse(c, timeBuffer);
 					}
-				}
-				
-				for (int c = 0; c < channels; ++c) {
-					auto bands = bandsForChannel(c);
-					auto &&spectrumBands = stft.spectrum[c];
-					for (int b = 0; b < stft.bands(); ++b) {
-						bands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+
+					for (int c = 0; c < channels; ++c) {
+						auto bands = bandsForChannel(c);
+						auto &&spectrumBands = stft.spectrum[c];
+						for (int b = 0; b < stft.bands(); ++b) {
+							bands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+						}
+					}
+
+					if (inputInterval != stft.interval()) { // make sure the previous input is the correct distance in the past
+						int prevIntervalOffset = inputOffset - stft.interval();
+						for (int c = 0; c < channels; ++c) {
+							// Copy from the history buffer, if needed
+							auto &&bufferChannel = inputBuffer[c];
+							for (int i = 0; i < std::min(-prevIntervalOffset, stft.windowSize()); ++i) {
+								timeBuffer[i] = bufferChannel[i + prevIntervalOffset];
+							}
+							// Copy the rest from the input
+							auto &&inputChannel = inputs[c];
+							for (int i = std::max<int>(0, -prevIntervalOffset); i < stft.windowSize(); ++i) {
+								timeBuffer[i] = inputChannel[i + prevIntervalOffset];
+							}
+							stft.analyse(c, timeBuffer);
+						}
+						for (int c = 0; c < channels; ++c) {
+							auto bands = bandsForChannel(c);
+							auto &&spectrumBands = stft.spectrum[c];
+							for (int b = 0; b < stft.bands(); ++b) {
+								bands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+							}
+						}
 					}
 				}
 				
-				processSpectrum(inputInterval);
+				Sample timeFactor = stft.interval()/std::max<Sample>(1, inputInterval);
+				processSpectrum(newSpectrum, timeFactor);
 
 				for (int c = 0; c < channels; ++c) {
 					auto bands = bandsForChannel(c);
@@ -223,8 +243,7 @@ private:
 	int prevInputOffset = -1;
 	std::vector<Sample> timeBuffer;
 
-	std::vector<Complex> rotCentreSpectrum, rotPrevOutput, rotPrevInput;
-	int rotPrevInputShift = -1;
+	std::vector<Complex> rotCentreSpectrum, rotPrevInterval;
 	Sample bandToFreq(int b) const {
 		return (b + Sample(0.5))/stft.fftSize();
 	}
@@ -309,20 +328,18 @@ private:
 	}
 	std::vector<int> maxEnergyChannel;
 
-	void processSpectrum(int inputInterval) {
-		int outputInterval = stft.interval();
+	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		int bands = stft.bands();
 		
-		Sample rate = outputInterval/std::max<Sample>(1, inputInterval);
-		rate = std::min<Sample>(2, rate); // For now, limit the intra-block time stretching to 2x
+		timeFactor = std::min<Sample>(2, timeFactor); // For now, limit the intra-block time stretching to 2x
 		
-		if (inputInterval > 0) {
+		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
 				for (int b = 0; b < stft.bands(); ++b) {
 					auto &bin = bins[b];
-					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevOutput[b]);
-					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInput[b]);
+					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevInterval[b]);
+					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
 				}
 			}
 		}
@@ -354,10 +371,10 @@ private:
 				prediction.freqPrediction = signalsmith::perf::mul(outputBin.prevOutput, freqTwist);
 
 				if (b > 0) {
-					Complex downInput = getFractional<&Band::input>(c, mapPoint.inputBin - rate);
+					Complex downInput = getFractional<&Band::input>(c, mapPoint.inputBin - timeFactor);
 					prediction.shortVerticalTwist = signalsmith::perf::mul<true>(prediction.input, downInput);
 					if (b > longVerticalStep) {
-						Complex longDownInput = getFractional<&Band::input>(c, mapPoint.inputBin - longVerticalStep*rate);
+						Complex longDownInput = getFractional<&Band::input>(c, mapPoint.inputBin - longVerticalStep*timeFactor);
 						prediction.longVerticalTwist = signalsmith::perf::mul<true>(prediction.input, longDownInput);
 					} else {
 						prediction.longVerticalTwist = 0;
@@ -439,7 +456,7 @@ private:
 			}
 		}
 
-		if (inputInterval > 0) {
+		if (newSpectrum) {
 			for (auto &bin : channelBands) {
 				bin.prevOutput = bin.output;
 				bin.prevInput = bin.input;
