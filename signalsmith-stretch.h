@@ -244,8 +244,11 @@ private:
 	std::vector<Sample> timeBuffer;
 
 	std::vector<Complex> rotCentreSpectrum, rotPrevInterval;
-	Sample bandToFreq(int b) const {
+	Sample bandToFreq(Sample b) const {
 		return (b + Sample(0.5))/stft.fftSize();
+	}
+	Sample freqToBand(Sample f) const {
+		return f*stft.fftSize() - Sample(0.5);
 	}
 	void timeShiftPhases(Sample shiftSamples, std::vector<Complex> &output) const {
 		for (int b = 0; b < stft.bands(); ++b) {
@@ -265,10 +268,7 @@ private:
 	}
 	template<Complex Band::*member>
 	Complex getBand(int channel, int index) {
-		if (index >= stft.bands()) return 0;
-		if (index < 0) {
-			return std::conj(getBand<member>(channel, -1 - index));
-		}
+		if (index < 0 || index >= stft.bands()) return 0;
 		return channelBands[index + channel*stft.bands()].*member;
 	}
 	template<Complex Band::*member>
@@ -285,8 +285,7 @@ private:
 	}
 	template<Sample Band::*member>
 	Sample getBand(int channel, int index) {
-		if (index < 0) index = -1 - index;
-		if (index >= stft.bands()) return 0;
+		if (index < 0 || index >= stft.bands()) return 0;
 		return channelBands[index + channel*stft.bands()].*member;
 	}
 	template<Sample Band::*member>
@@ -304,10 +303,6 @@ private:
 
 	struct Peak {
 		Sample input, output;
-		
-		bool operator< (const Peak &other) const {
-			return output < other.output;
-		}
 	};
 	std::vector<Peak> peaks;
 	std::vector<Sample> energy, smoothedEnergy;
@@ -512,20 +507,17 @@ private:
 		int start = 0;
 		while (start < stft.bands()) {
 			if (energy[start] > smoothedEnergy[start]) {
-				int end = start + 1;
+				int end = start;
+				Sample bandSum = 0, energySum = 0;
 				while (end < stft.bands() && energy[end] > smoothedEnergy[end]) {
+					bandSum += end*energy[end];
+					energySum += energy[end];
 					++end;
 				}
-				// Take the average frequency and energy across the peak range
-				Sample freqSum = 0, energySum = 0;
-				for (int b = start; b < end; ++b) {
-					Sample e = energy[b];
-					freqSum += (b + 0.5)*e;
-					energySum += e;
-				}
-				Sample avgFreq = freqSum/(stft.fftSize()*energySum);
+				Sample avgBand = bandSum/energySum;
+				Sample avgFreq = bandToFreq(avgBand);
 				Sample avgEnergy = energySum/(end - start);
-				peaks.emplace_back(Peak{avgFreq*stft.fftSize(), mapFreq(avgFreq)*stft.fftSize()});
+				peaks.emplace_back(Peak{avgBand, freqToBand(mapFreq(avgFreq))});
 
 				start = end;
 			}
