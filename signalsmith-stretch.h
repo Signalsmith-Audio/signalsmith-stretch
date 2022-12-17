@@ -61,7 +61,6 @@ struct SignalsmithStretch {
 		smoothedEnergy.resize(stft.bands());
 		outputMap.resize(stft.bands());
 		channelPredictions.resize(channels*stft.bands());
-		maxEnergyChannel.resize(stft.bands());
 	}
 	
 	template<class Inputs, class Outputs>
@@ -327,7 +326,6 @@ private:
 	Prediction * predictionsForChannel(int c) {
 		return channelPredictions.data() + c*stft.bands();
 	}
-	std::vector<int> maxEnergyChannel;
 
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		int bands = stft.bands();
@@ -349,13 +347,11 @@ private:
 		findPeaks(smoothingBins);
 		updateOutputMap(smoothingBins);
 
-		int longVerticalStep = std::round(smoothingBins);
-		for (auto &c : maxEnergyChannel) c = -1;
+		// Preliminary output prediction from phase-vocoder
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
 			for (int b = 0; b < stft.bands(); ++b) {
-				auto &outputBin = bins[b];
 				auto mapPoint = outputMap[b];
 				int lowIndex = std::floor(mapPoint.inputBin);
 				Sample fracIndex = mapPoint.inputBin - std::floor(mapPoint.inputBin);
@@ -365,19 +361,20 @@ private:
 				prediction.energy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
 				prediction.input = getFractional<&Band::input>(c, lowIndex, fracIndex);
 
-				// Preliminary output prediction from phase-vocoder
+				auto &outputBin = bins[b];
 				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
 				Complex freqTwist = signalsmith::perf::mul<true>(prediction.input, prevInput);
 				Complex phase = signalsmith::perf::mul(outputBin.prevOutput, freqTwist);
 				outputBin.output = prediction.makeOutput(phase);
 			}
 		}
-		
-		auto *predictions0 = predictionsForChannel(0);
+
+		// Re-predict using phase differences between frequencies
+		int longVerticalStep = std::round(smoothingBins);
 		for (int b = 0; b < stft.bands(); ++b) {
 			// Find maximum-energy channel and calculate that
 			int maxChannel = 0;
-			Sample maxEnergy = predictions0[b].energy;
+			Sample maxEnergy = predictionsForChannel(0)[b].energy;
 			for (int c = 1; c < channels; ++c) {
 				Sample e = predictionsForChannel(c)[b].energy;
 				if (e > maxEnergy) {
@@ -394,45 +391,47 @@ private:
 
 			Complex phase = 0;
 
-			// Short vertical step
+			// Upwards vertical steps
 			if (b > 0) {
 				if (!prediction.hasShortVertical) {
 					Complex downInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - timeFactor);
 					prediction.shortVerticalTwist = signalsmith::perf::mul<true>(prediction.input, downInput);
 				}
-				auto &otherBin = bins[b - 1];
-				phase += signalsmith::perf::mul(otherBin.output, prediction.shortVerticalTwist);
+				auto &downBin = bins[b - 1];
+				phase += signalsmith::perf::mul(downBin.output, prediction.shortVerticalTwist);
+				
+				if (b >= longVerticalStep) {
+					if (!prediction.hasLongVertical) {
+						Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*timeFactor);
+						prediction.longVerticalTwist = signalsmith::perf::mul<true>(prediction.input, longDownInput);
+					}
+					auto &longDownBin = bins[b - longVerticalStep];
+					phase += signalsmith::perf::mul(longDownBin.output, prediction.longVerticalTwist);
+				}
 			}
+			// Downwards vertical steps
 			if (b < stft.bands() - 1) {
-				auto &otherPrediction = predictions[b + 1];
+				auto &upPrediction = predictions[b + 1];
 				{ // upwards short vertical twist
-					auto otherMapPoint = outputMap[b + 1];
-					Complex downInput = getFractional<&Band::input>(maxChannel, otherMapPoint.inputBin - timeFactor);
-					otherPrediction.shortVerticalTwist = signalsmith::perf::mul<true>(otherPrediction.input, downInput);
-					otherPrediction.hasShortVertical = true;
+					auto upMapPoint = outputMap[b + 1];
+					Complex upInput = getFractional<&Band::input>(maxChannel, upMapPoint.inputBin - timeFactor);
+					upPrediction.shortVerticalTwist = signalsmith::perf::mul<true>(upPrediction.input, upInput);
+					upPrediction.hasShortVertical = true;
 				}
-				auto &otherBin = bins[b + 1];
-				phase += signalsmith::perf::mul<true>(otherBin.output, otherPrediction.shortVerticalTwist);
-			}
-			// Long vertical steps
-			if (b > longVerticalStep) {
-				if (!prediction.hasLongVertical) {
-					Complex downInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*timeFactor);
-					prediction.longVerticalTwist = signalsmith::perf::mul<true>(prediction.input, downInput);
+				auto &upBin = bins[b + 1];
+				phase += signalsmith::perf::mul<true>(upBin.output, upPrediction.shortVerticalTwist);
+				
+				if (b < stft.bands() - longVerticalStep) {
+					auto &longUpPrediction = predictions[b + longVerticalStep];
+					{ // upwards long vertical twist
+						auto longUpMapPoint = outputMap[b + longVerticalStep];
+						Complex longUpInput = getFractional<&Band::input>(maxChannel, longUpMapPoint.inputBin - longVerticalStep*timeFactor);
+						longUpPrediction.longVerticalTwist = signalsmith::perf::mul<true>(longUpPrediction.input, longUpInput);
+						longUpPrediction.hasLongVertical = true;
+					}
+					auto &longUpBin = bins[b + longVerticalStep];
+					phase += signalsmith::perf::mul<true>(longUpBin.output, longUpPrediction.longVerticalTwist);
 				}
-				auto &otherBin = bins[b - longVerticalStep];
-				phase += signalsmith::perf::mul(otherBin.output, prediction.longVerticalTwist);
-			}
-			if (b < stft.bands() - longVerticalStep) {
-				auto &otherPrediction = predictions[b + longVerticalStep];
-				{ // upwards long vertical twist
-					auto otherMapPoint = outputMap[b + longVerticalStep];
-					Complex downInput = getFractional<&Band::input>(maxChannel, otherMapPoint.inputBin - longVerticalStep*timeFactor);
-					otherPrediction.longVerticalTwist = signalsmith::perf::mul<true>(otherPrediction.input, downInput);
-					otherPrediction.hasLongVertical = true;
-				}
-				auto &otherBin = bins[b + longVerticalStep];
-				phase += signalsmith::perf::mul<true>(otherBin.output, otherPrediction.longVerticalTwist);
 			}
 
 			outputBin.output = prediction.makeOutput(phase);
