@@ -318,7 +318,10 @@ private:
 
 		Complex makeOutput(Complex phase) {
 			Sample phaseNorm = std::norm(phase);
-			if (phaseNorm <= noiseFloor) return input;
+			if (phaseNorm <= noiseFloor) {
+				phase = input; // prediction is too weak, fall back to the input
+				phaseNorm = std::norm(input) + noiseFloor;
+			}
 			return phase*std::sqrt(energy/phaseNorm);
 		}
 	};
