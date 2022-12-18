@@ -360,6 +360,7 @@ private:
 				Sample fracIndex = mapPoint.inputBin - std::floor(mapPoint.inputBin);
 
 				Prediction &prediction = predictions[b];
+				Sample prevEnergy = prediction.energy;
 				prediction.energy = getFractional<&Band::inputEnergy>(c, lowIndex, fracIndex);
 				prediction.energy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
 				prediction.input = getFractional<&Band::input>(c, lowIndex, fracIndex);
@@ -368,7 +369,7 @@ private:
 				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
 				Complex freqTwist = signalsmith::perf::mul<true>(prediction.input, prevInput);
 				Complex phase = signalsmith::perf::mul(outputBin.prevOutput, freqTwist);
-				outputBin.output = phase/(prediction.energy + noiseFloor);
+				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
 
 				if (b > 0) {
 					Complex downInput = getFractional<&Band::input>(c, mapPoint.inputBin - timeFactor);
