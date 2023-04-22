@@ -23,6 +23,19 @@ stretch.presetCheaper(channels, sampleRate);
 
 If you want to test out different block-sizes etc. then you can use `.configure()` manually.
 
+```cpp
+stretch.configure(channels, blockSamples, intervalSamples);
+```
+
+You can query the current configuration:
+
+```cpp
+int block = stretch.blockSamples();
+int interval = stretch.intervalSamples();
+int inputLatency = stretch.inputLatency();
+int outputLatency = stretch.outputLatency();
+```
+
 ### Processing (and resetting)
 
 ```cpp
@@ -32,14 +45,9 @@ stretch.reset();
 float **inputBuffers, **outputBuffers;
 int inputSamples, outputSamples;
 stretch.process(inputBuffers, inputSamples, outputBuffers, outputSamples);
-
-// Inspect latency
-int totalLatency = stretch.inputLatency() + stretch.outputLatency();
 ```
 
 The `.process()` method takes anything where `buffer[channel][index]` gives you a sample.  This could be a `float **` or a `double **` or some custom object.
-
-To get a time-stretch, just hand it differently-sized input/output buffers.
 
 ### Pitch-shifting
 
@@ -63,6 +71,12 @@ stretch.setFreqMap([](float inputFreq) {
 });
 ```
 
+### Time-stretching
+
+To get a time-stretch, hand differently-sized input/output buffers to .process(). There's no maximum block size for either input or output.
+
+Since the buffer lengths (inputSamples and outputSamples above) are integers, it's up to you to make sure that the block lengths average out to the ratio you want over time.
+
 ## Compiling
 
 Just include `signalsmith-stretch.h` in your build.
@@ -73,7 +87,7 @@ It's pretty slow if optimisation is disabled though, so you might want to enable
 
 This uses the Signalsmith DSP library for FFTs and other bits and bobs.
 
-For convenience, a copy of the license is included (with its own `LICENSE.txt`) in `dsp/`, but if you're already using this elsewhere then you should remove this copy to avoid versioning issues.
+For convenience, a copy of the library is included (with its own `LICENSE.txt`) in `dsp/`, but if you're already using this elsewhere then you should remove this copy to avoid versioning issues.
 
 ## License
 
