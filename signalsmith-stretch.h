@@ -65,6 +65,25 @@ struct SignalsmithStretch {
 		outputMap.resize(stft.bands());
 		channelPredictions.resize(channels*stft.bands());
 	}
+
+	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
+	void setTransposeFactor(Sample multiplier, Sample tonalityLimit=0) {
+		freqMultiplier = multiplier;
+		if (tonalityLimit > 0) {
+			freqTonalityLimit = tonalityLimit/std::sqrt(multiplier); // compromise between input and output limits
+		} else {
+			freqTonalityLimit = 1;
+		}
+		customFreqMap = nullptr;
+	}
+	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
+		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
+		customFreqMap = nullptr;
+	}
+	// Sets a custom frequency map - should be monotonically increasing
+	void setFreqMap(std::function<Sample(Sample)> inputToOutput) {
+		customFreqMap = inputToOutput;
+	}
 	
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
@@ -209,25 +228,6 @@ struct SignalsmithStretch {
 		inputBuffer += inputSamples;
 		stft += outputSamples;
 		prevInputOffset -= inputSamples;
-	}
-	
-	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
-	void setTransposeFactor(Sample multiplier, Sample tonalityLimit=0) {
-		freqMultiplier = multiplier;
-		if (tonalityLimit > 0) {
-			freqTonalityLimit = tonalityLimit/std::sqrt(multiplier); // compromise between input and output limits
-		} else {
-			freqTonalityLimit = 1;
-		}
-		customFreqMap = nullptr;
-	}
-	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
-		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
-		customFreqMap = nullptr;
-	}
-	// Sets a custom frequency map - should be monotonically increasing
-	void setFreqMap(std::function<Sample(Sample)> inputToOutput) {
-		customFreqMap = inputToOutput;
 	}
 	
 private:
