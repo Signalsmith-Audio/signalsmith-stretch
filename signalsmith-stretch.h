@@ -339,7 +339,6 @@ private:
 		int bands = stft.bands();
 
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
-		timeFactor = std::min<Sample>(maxCleanStretch*2, timeFactor);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2 - timeFactor, timeFactor);
 		
 		if (newSpectrum) {
