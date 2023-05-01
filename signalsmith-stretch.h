@@ -8,11 +8,14 @@ SIGNALSMITH_DSP_VERSION_CHECK(1, 3, 3); // Check version is compatible
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include <random>
 
 namespace signalsmith { namespace stretch {
 
 template<typename Sample=float>
 struct SignalsmithStretch {
+
+	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 
 	int blockSamples() const {
 		return stft.windowSize();
@@ -230,6 +233,7 @@ struct SignalsmithStretch {
 private:
 	using Complex = std::complex<Sample>;
 	static constexpr Sample noiseFloor{1e-15};
+	static constexpr Sample maxCleanStretch{2}; // time-stretch ratio before we start randomising phases
 	int silenceCounter = 0;
 	bool silenceFirst = true;
 
@@ -328,11 +332,15 @@ private:
 	Prediction * predictionsForChannel(int c) {
 		return channelPredictions.data() + c*stft.bands();
 	}
+	
+	std::default_random_engine randomEngine;
 
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		int bands = stft.bands();
-		
-		timeFactor = std::min<Sample>(2, timeFactor); // For now, limit the intra-block time stretching to 2x
+
+		bool randomTimeFactor = (timeFactor > maxCleanStretch);
+		timeFactor = std::min<Sample>(maxCleanStretch*2, timeFactor);
+		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2 - timeFactor, timeFactor);
 		
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
@@ -372,10 +380,11 @@ private:
 				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
 
 				if (b > 0) {
-					Complex downInput = getFractional<&Band::input>(c, mapPoint.inputBin - timeFactor);
+					Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
+					Complex downInput = getFractional<&Band::input>(c, mapPoint.inputBin - binTimeFactor);
 					prediction.shortVerticalTwist = signalsmith::perf::mul<true>(prediction.input, downInput);
 					if (b >= longVerticalStep) {
-						Complex longDownInput = getFractional<&Band::input>(c, mapPoint.inputBin - longVerticalStep*timeFactor);
+						Complex longDownInput = getFractional<&Band::input>(c, mapPoint.inputBin - longVerticalStep*binTimeFactor);
 						prediction.longVerticalTwist = signalsmith::perf::mul<true>(prediction.input, longDownInput);
 					} else {
 						prediction.longVerticalTwist = 0;
