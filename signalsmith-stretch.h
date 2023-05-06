@@ -16,6 +16,7 @@ template<typename Sample=float>
 struct SignalsmithStretch {
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
+	SignalsmithStretch(long seed) : randomEngine(seed) {}
 
 	int blockSamples() const {
 		return stft.windowSize();
@@ -165,10 +166,10 @@ struct SignalsmithStretch {
 					}
 
 					for (int c = 0; c < channels; ++c) {
-						auto bands = bandsForChannel(c);
+						auto channelBands = bandsForChannel(c);
 						auto &&spectrumBands = stft.spectrum[c];
 						for (int b = 0; b < stft.bands(); ++b) {
-							bands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+							channelBands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 						}
 					}
 
@@ -188,10 +189,10 @@ struct SignalsmithStretch {
 							stft.analyse(c, timeBuffer);
 						}
 						for (int c = 0; c < channels; ++c) {
-							auto bands = bandsForChannel(c);
+							auto channelBands = bandsForChannel(c);
 							auto &&spectrumBands = stft.spectrum[c];
 							for (int b = 0; b < stft.bands(); ++b) {
-								bands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+								channelBands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 							}
 						}
 					}
@@ -201,10 +202,10 @@ struct SignalsmithStretch {
 				processSpectrum(newSpectrum, timeFactor);
 
 				for (int c = 0; c < channels; ++c) {
-					auto bands = bandsForChannel(c);
+					auto channelBands = bandsForChannel(c);
 					auto &&spectrumBands = stft.spectrum[c];
 					for (int b = 0; b < stft.bands(); ++b) {
-						spectrumBands[b] = signalsmith::perf::mul<true>(bands[b].output, rotCentreSpectrum[b]);
+						spectrumBands[b] = signalsmith::perf::mul<true>(channelBands[b].output, rotCentreSpectrum[b]);
 					}
 				}
 			});
@@ -338,13 +339,14 @@ private:
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		int bands = stft.bands();
 
+		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2 - timeFactor, timeFactor);
 		
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
-				for (int b = 0; b < stft.bands(); ++b) {
+				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];
 					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevInterval[b]);
 					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
@@ -355,13 +357,13 @@ private:
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
 		int longVerticalStep = std::round(smoothingBins);
 		findPeaks(smoothingBins);
-		updateOutputMap(smoothingBins);
+		updateOutputMap();
 
 		// Preliminary output prediction from phase-vocoder
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
-			for (int b = 0; b < stft.bands(); ++b) {
+			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
 				int lowIndex = std::floor(mapPoint.inputBin);
 				Sample fracIndex = mapPoint.inputBin - std::floor(mapPoint.inputBin);
@@ -395,7 +397,7 @@ private:
 		}
 
 		// Re-predict using phase differences between frequencies
-		for (int b = 0; b < stft.bands(); ++b) {
+		for (int b = 0; b < bands; ++b) {
 			// Find maximum-energy channel and calculate that
 			int maxChannel = 0;
 			Sample maxEnergy = predictionsForChannel(0)[b].energy;
@@ -411,7 +413,6 @@ private:
 			auto &prediction = predictions[b];
 			auto *bins = bandsForChannel(maxChannel);
 			auto &outputBin = bins[b];
-			auto mapPoint = outputMap[b];
 
 			Complex phase = 0;
 
@@ -426,12 +427,12 @@ private:
 				}
 			}
 			// Downwards vertical steps
-			if (b < stft.bands() - 1) {
+			if (b < bands - 1) {
 				auto &upPrediction = predictions[b + 1];
 				auto &upBin = bins[b + 1];
 				phase += signalsmith::perf::mul<true>(upBin.output, upPrediction.shortVerticalTwist);
 				
-				if (b < stft.bands() - longVerticalStep) {
+				if (b < bands - longVerticalStep) {
 					auto &longUpPrediction = predictions[b + longVerticalStep];
 					auto &longUpBin = bins[b + longVerticalStep];
 					phase += signalsmith::perf::mul<true>(longUpBin.output, longUpPrediction.longVerticalTwist);
@@ -465,26 +466,27 @@ private:
 	
 	// Produces smoothed energy across all channels
 	void smoothEnergy(Sample smoothingBins) {
+		int bands = stft.bands();
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
 		for (auto &e : energy) e = 0;
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
-			for (int b = 0; b < stft.bands(); ++b) {
+			for (int b = 0; b < bands; ++b) {
 				Sample e = std::norm(bins[b].input);
 				bins[b].inputEnergy = e; // Used for interpolating prediction energy
 				energy[b] += e;
 			}
 		}
-		for (int b = 0; b < stft.bands(); ++b) {
+		for (int b = 0; b < bands; ++b) {
 			smoothedEnergy[b] = energy[b];
 		}
 		Sample e = 0;
 		for (int repeat = 0; repeat < 2; ++repeat) {
-			for (int b = stft.bands() - 1; b >= 0; --b) {
+			for (int b = bands - 1; b >= 0; --b) {
 				e += (smoothedEnergy[b] - e)*smoothingSlew;
 				smoothedEnergy[b] = e;
 			}
-			for (int b = 0; b < stft.bands(); ++b) {
+			for (int b = 0; b < bands; ++b) {
 				e += (smoothedEnergy[b] - e)*smoothingSlew;
 				smoothedEnergy[b] = e;
 			}
@@ -506,12 +508,12 @@ private:
 
 		peaks.resize(0);
 		
-		int start = 0;
-		while (start < stft.bands()) {
+		int start = 0, bands = stft.bands();
+		while (start < bands) {
 			if (energy[start] > smoothedEnergy[start]) {
 				int end = start;
 				Sample bandSum = 0, energySum = 0;
-				while (end < stft.bands() && energy[end] > smoothedEnergy[end]) {
+				while (end < bands && energy[end] > smoothedEnergy[end]) {
 					bandSum += end*energy[end];
 					energySum += energy[end];
 					++end;
@@ -526,15 +528,16 @@ private:
 		}
 	}
 	
-	void updateOutputMap(Sample peakWidthBins) {
+	void updateOutputMap() {
+		int bands = stft.bands();
 		if (peaks.empty()) {
-			for (int b = 0; b < stft.bands(); ++b) {
+			for (int b = 0; b < bands; ++b) {
 				outputMap[b] = {Sample(b), 1};
 			}
 			return;
 		}
 		Sample bottomOffset = peaks[0].input - peaks[0].output;
-		for (int b = 0; b < std::min<int>(stft.bands(), std::ceil(peaks[0].output)); ++b) {
+		for (int b = 0; b < std::min<int>(bands, std::ceil(peaks[0].output)); ++b) {
 			outputMap[b] = {b + bottomOffset, 1};
 		}
 		// Interpolate between points
@@ -545,7 +548,7 @@ private:
 			Sample outScale = next.input - next.output - prev.input + prev.output;
 			Sample gradScale = outScale*rangeScale;
 			int startBin = std::max<int>(0, std::ceil(prev.output));
-			int endBin = std::min<int>(stft.bands(), std::ceil(next.output));
+			int endBin = std::min<int>(bands, std::ceil(next.output));
 			for (int b = startBin; b < endBin; ++b) {
 				Sample r = (b - prev.output)*rangeScale;
 				Sample h = r*r*(3 - 2*r);
@@ -558,7 +561,7 @@ private:
 			}
 		}
 		Sample topOffset = peaks.back().input - peaks.back().output;
-		for (int b = std::max<int>(0, peaks.back().output); b < stft.bands(); ++b) {
+		for (int b = std::max<int>(0, peaks.back().output); b < bands; ++b) {
 			outputMap[b] = {b + topOffset, 1};
 		}
 	}
