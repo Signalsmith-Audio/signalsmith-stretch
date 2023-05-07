@@ -356,8 +356,20 @@ private:
 
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
 		int longVerticalStep = std::round(smoothingBins);
-		findPeaks(smoothingBins);
-		updateOutputMap();
+		if (customFreqMap || freqMultiplier != 1) {
+			findPeaks(smoothingBins);
+			updateOutputMap();
+		} else { // we're not pitch-shifting, so no need to find peaks etc.
+			for (int c = 0; c < channels; ++c) {
+				Band *bins = bandsForChannel(c);
+				for (int b = 0; b < bands; ++b) {
+					bins[b].inputEnergy = std::norm(bins[b].input);
+				}
+			}
+			for (int b = 0; b < bands; ++b) {
+				outputMap[b] = {Sample(b), 1};
+			}
+		}
 
 		// Preliminary output prediction from phase-vocoder
 		for (int c = 0; c < channels; ++c) {
