@@ -51,20 +51,21 @@ struct SignalsmithStretch {
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
 		channels = nChannels;
 		stft.resize(channels, blockSamples, intervalSamples);
+		bands = stft.bands();
 		inputBuffer.resize(channels, blockSamples + intervalSamples + 1);
 		timeBuffer.assign(stft.fftSize(), 0);
-		channelBands.assign(stft.bands()*channels, Band());
+		channelBands.assign(bands*channels, Band());
 		
 		// Various phase rotations
-		rotCentreSpectrum.resize(stft.bands());
-		rotPrevInterval.assign(stft.bands(), 0);
+		rotCentreSpectrum.resize(bands);
+		rotPrevInterval.assign(bands, 0);
 		timeShiftPhases(blockSamples*Sample(-0.5), rotCentreSpectrum);
 		timeShiftPhases(-intervalSamples, rotPrevInterval);
-		peaks.reserve(stft.bands());
-		energy.resize(stft.bands());
-		smoothedEnergy.resize(stft.bands());
-		outputMap.resize(stft.bands());
-		channelPredictions.resize(channels*stft.bands());
+		peaks.reserve(bands);
+		energy.resize(bands);
+		smoothedEnergy.resize(bands);
+		outputMap.resize(bands);
+		channelPredictions.resize(channels*bands);
 	}
 
 	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
@@ -168,7 +169,7 @@ struct SignalsmithStretch {
 					for (int c = 0; c < channels; ++c) {
 						auto channelBands = bandsForChannel(c);
 						auto &&spectrumBands = stft.spectrum[c];
-						for (int b = 0; b < stft.bands(); ++b) {
+						for (int b = 0; b < bands; ++b) {
 							channelBands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 						}
 					}
@@ -191,7 +192,7 @@ struct SignalsmithStretch {
 						for (int c = 0; c < channels; ++c) {
 							auto channelBands = bandsForChannel(c);
 							auto &&spectrumBands = stft.spectrum[c];
-							for (int b = 0; b < stft.bands(); ++b) {
+							for (int b = 0; b < bands; ++b) {
 								channelBands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 							}
 						}
@@ -204,7 +205,7 @@ struct SignalsmithStretch {
 				for (int c = 0; c < channels; ++c) {
 					auto channelBands = bandsForChannel(c);
 					auto &&spectrumBands = stft.spectrum[c];
-					for (int b = 0; b < stft.bands(); ++b) {
+					for (int b = 0; b < bands; ++b) {
 						spectrumBands[b] = signalsmith::perf::mul<true>(channelBands[b].output, rotCentreSpectrum[b]);
 					}
 				}
@@ -243,7 +244,7 @@ private:
 
 	signalsmith::spectral::STFT<Sample> stft{0, 1, 1};
 	signalsmith::delay::MultiBuffer<Sample> inputBuffer;
-	int channels = 0;
+	int channels = 0, bands = 0;
 	int prevInputOffset = -1;
 	std::vector<Sample> timeBuffer;
 
@@ -255,7 +256,7 @@ private:
 		return f*stft.fftSize() - Sample(0.5);
 	}
 	void timeShiftPhases(Sample shiftSamples, std::vector<Complex> &output) const {
-		for (int b = 0; b < stft.bands(); ++b) {
+		for (int b = 0; b < bands; ++b) {
 			Sample phase = bandToFreq(b)*shiftSamples*Sample(-2*M_PI);
 			output[b] = {std::cos(phase), std::sin(phase)};
 		}
@@ -268,12 +269,12 @@ private:
 	};
 	std::vector<Band> channelBands;
 	Band * bandsForChannel(int channel) {
-		return channelBands.data() + channel*stft.bands();
+		return channelBands.data() + channel*bands;
 	}
 	template<Complex Band::*member>
 	Complex getBand(int channel, int index) {
-		if (index < 0 || index >= stft.bands()) return 0;
-		return channelBands[index + channel*stft.bands()].*member;
+		if (index < 0 || index >= bands) return 0;
+		return channelBands[index + channel*bands].*member;
 	}
 	template<Complex Band::*member>
 	Complex getFractional(int channel, int lowIndex, Sample fractional) {
@@ -284,13 +285,13 @@ private:
 	template<Complex Band::*member>
 	Complex getFractional(int channel, Sample inputIndex) {
 		int lowIndex = std::floor(inputIndex);
-		Sample fracIndex = inputIndex - std::floor(inputIndex);
+		Sample fracIndex = inputIndex - lowIndex;
 		return getFractional<member>(channel, lowIndex, fracIndex);
 	}
 	template<Sample Band::*member>
 	Sample getBand(int channel, int index) {
-		if (index < 0 || index >= stft.bands()) return 0;
-		return channelBands[index + channel*stft.bands()].*member;
+		if (index < 0 || index >= bands) return 0;
+		return channelBands[index + channel*bands].*member;
 	}
 	template<Sample Band::*member>
 	Sample getFractional(int channel, int lowIndex, Sample fractional) {
@@ -301,7 +302,7 @@ private:
 	template<Sample Band::*member>
 	Sample getFractional(int channel, Sample inputIndex) {
 		int lowIndex = std::floor(inputIndex);
-		Sample fracIndex = inputIndex - std::floor(inputIndex);
+		Sample fracIndex = inputIndex - lowIndex;
 		return getFractional<member>(channel, lowIndex, fracIndex);
 	}
 
@@ -331,14 +332,12 @@ private:
 	};
 	std::vector<Prediction> channelPredictions;
 	Prediction * predictionsForChannel(int c) {
-		return channelPredictions.data() + c*stft.bands();
+		return channelPredictions.data() + c*bands;
 	}
 	
 	std::default_random_engine randomEngine;
 
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
-		int bands = stft.bands();
-
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2 - timeFactor, timeFactor);
@@ -378,7 +377,7 @@ private:
 			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
 				int lowIndex = std::floor(mapPoint.inputBin);
-				Sample fracIndex = mapPoint.inputBin - std::floor(mapPoint.inputBin);
+				Sample fracIndex = mapPoint.inputBin - lowIndex;
 
 				Prediction &prediction = predictions[b];
 				Sample prevEnergy = prediction.energy;
@@ -478,7 +477,6 @@ private:
 	
 	// Produces smoothed energy across all channels
 	void smoothEnergy(Sample smoothingBins) {
-		int bands = stft.bands();
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
 		for (auto &e : energy) e = 0;
 		for (int c = 0; c < channels; ++c) {
@@ -520,7 +518,7 @@ private:
 
 		peaks.resize(0);
 		
-		int start = 0, bands = stft.bands();
+		int start = 0;
 		while (start < bands) {
 			if (energy[start] > smoothedEnergy[start]) {
 				int end = start;
@@ -541,7 +539,6 @@ private:
 	}
 	
 	void updateOutputMap() {
-		int bands = stft.bands();
 		if (peaks.empty()) {
 			for (int b = 0; b < bands; ++b) {
 				outputMap[b] = {Sample(b), 1};
