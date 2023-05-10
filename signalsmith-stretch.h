@@ -340,7 +340,7 @@ private:
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
-		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2 - timeFactor, timeFactor);
+		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
 		
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
