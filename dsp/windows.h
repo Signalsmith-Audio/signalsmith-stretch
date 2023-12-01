@@ -1,9 +1,10 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_WINDOWS_H
 #define SIGNALSMITH_DSP_WINDOWS_H
 
-#include "./common.h"
-
 #include <cmath>
+#include <algorithm>
 
 namespace signalsmith {
 namespace windows {
@@ -77,7 +78,7 @@ namespace windows {
 		/// @name Performance methods
 		/// @{
 		/** @brief Total energy ratio (in dB) between side-lobes and the main lobe.
-			\diagram{kaiser-bandwidth-sidelobes-energy.svg,Measured main/side lobe energy ratio.  You can see that the heuristic improves performance for all bandwidth values.}
+			\diagram{windows-kaiser-sidelobe-energy.svg,Measured main/side lobe energy ratio.  You can see that the heuristic improves performance for all bandwidth values.}
 			This function uses an approximation which is accurate to ±0.5dB for 2 ⩽ bandwidth ≤ 10, or 1 ⩽ bandwidth ≤ 10 when `heuristicOptimal`is enabled.
 		*/
 		static double bandwidthToEnergyDb(double bandwidth, bool heuristicOptimal=false) {
@@ -105,7 +106,7 @@ namespace windows {
 			return bw;
 		}
 		/** @brief Peak ratio (in dB) between side-lobes and the main lobe.
-			\diagram{kaiser-bandwidth-sidelobes-peak.svg,Measured main/side lobe peak ratio.  You can see that the heuristic improves performance, except in the bandwidth range 1-2 where peak ratio was sacrificed to improve total energy ratio.}
+			\diagram{windows-kaiser-sidelobe-peaks.svg,Measured main/side lobe peak ratio.  You can see that the heuristic improves performance, except in the bandwidth range 1-2 where peak ratio was sacrificed to improve total energy ratio.}
 			This function uses an approximation which is accurate to ±0.5dB for 2 ⩽ bandwidth ≤ 9, or 0.5 ⩽ bandwidth ≤ 9 when `heuristicOptimal`is enabled.
 		*/
 		static double bandwidthToPeakDb(double bandwidth, bool heuristicOptimal=false) {
@@ -134,7 +135,7 @@ namespace windows {
 		/** @} */
 
 		/** Equivalent noise bandwidth (ENBW), a measure of frequency resolution.
-			\diagram{kaiser-bandwidth-enbw.svg,Measured ENBW, with and without the heuristic bandwidth adjustment.}
+			\diagram{windows-kaiser-enbw.svg,Measured ENBW\, with and without the heuristic bandwidth adjustment.}
 			This approximation is accurate to ±0.05 up to a bandwidth of 22.
 		*/
 		static double bandwidthToEnbw(double bandwidth, bool heuristicOptimal=false) {
@@ -152,7 +153,7 @@ namespace windows {
 	
 		/// Fills an arbitrary container with a Kaiser window
 		template<typename Data>
-		void fill(Data &data, int size) const {
+		void fill(Data &&data, int size) const {
 			double invSize = 1.0/size;
 			for (int i = 0; i < size; ++i) {
 				double r = (2*i + 1)*invSize - 1;
@@ -162,12 +163,45 @@ namespace windows {
 		}
 	};
 
+	/** @brief The Approximate Confined Gaussian window is (almost) optimal
+		
+		ACG windows can be constructing using the shape-parameter (sigma) or using the static `with???()` methods.*/
+	class ApproximateConfinedGaussian {
+		double gaussianFactor;
+		
+		double gaussian(double x) const {
+			return std::exp(-x*x*gaussianFactor);
+		}
+	public:
+		/// Heuristic map from bandwidth to the appropriately-optimal sigma
+		static double bandwidthToSigma(double bandwidth) {
+			return 0.3/std::sqrt(bandwidth);
+		}
+		static ApproximateConfinedGaussian withBandwidth(double bandwidth) {
+			return ApproximateConfinedGaussian(bandwidthToSigma(bandwidth));
+		}
+
+		ApproximateConfinedGaussian(double sigma) : gaussianFactor(0.0625/(sigma*sigma)) {}
+	
+		/// Fills an arbitrary container
+		template<typename Data>
+		void fill(Data &&data, int size) const {
+			double invSize = 1.0/size;
+			double offsetScale = gaussian(1)/(gaussian(3) + gaussian(-1));
+			double norm = 1/(gaussian(0) - 2*offsetScale*(gaussian(2)));
+			for (int i = 0; i < size; ++i) {
+				double r = (2*i + 1)*invSize - 1;
+				data[i] = norm*(gaussian(r) - offsetScale*(gaussian(r - 2) + gaussian(r + 2)));
+			}
+		}
+	};
+
 	/** Forces STFT perfect-reconstruction (WOLA) on an existing window, for a given STFT interval.
 	For example, here are perfect-reconstruction versions of the approximately-optimal @ref Kaiser windows:
 	\diagram{kaiser-windows-heuristic-pr.svg,Note the lower overall energy\, and the pointy top for 2x bandwidth. Spectral performance is about the same\, though.}
 	*/
 	template<typename Data>
-	void forcePerfectReconstruction(Data &data, int windowLength, int interval) {
+	void forcePerfectReconstruction(Data &&data, int windowLength, int interval) {
 		for (int i = 0; i < interval; ++i) {
 			double sum2 = 0;
 			for (int index = i; index < windowLength; index += interval) {

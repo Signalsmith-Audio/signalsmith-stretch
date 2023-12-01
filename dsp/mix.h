@@ -1,7 +1,7 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_MULTI_CHANNEL_H
 #define SIGNALSMITH_DSP_MULTI_CHANNEL_H
-
-#include "./common.h"
 
 #include <array>
 

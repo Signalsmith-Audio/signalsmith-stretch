@@ -1,7 +1,8 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_FFT_V5
 #define SIGNALSMITH_FFT_V5
 
-#include "./common.h"
 #include "./perf.h"
 
 #include <vector>

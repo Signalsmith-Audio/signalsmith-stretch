@@ -1,7 +1,7 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_CURVES_H
 #define SIGNALSMITH_DSP_CURVES_H
-
-#include "./common.h"
 
 #include <vector>
 #include <algorithm> // std::stable_sort
@@ -27,6 +27,10 @@ namespace curves {
 
 		Sample operator ()(Sample x) const {
 			return a0 + x*a1;
+		}
+		
+		Sample dx() const {
+			return a1;
 		}
 		
 		/// Returns the inverse map (with some numerical error)
@@ -178,16 +182,33 @@ namespace curves {
 		}
 		
 		/// Reads a value out from the curve.
-		Sample operator ()(Sample x) const {
+		Sample operator()(Sample x) const {
 			if (x <= first.x) return first.y;
 			if (x >= last.x) return last.y;
-			size_t index = 1;
-			while (index < _segments.size() && _segments[index].start() <= x) {
-				++index;
+			
+			// Binary search
+			size_t low = 0, high = _segments.size();
+			while (true) {
+				size_t mid = (low + high)/2;
+				if (low == mid) break;
+				if (_segments[mid].start() <= x) {
+					low = mid;
+				} else {
+					high = mid;
+				}
 			}
-			return _segments[index - 1](x);
+			return _segments[low](x);
 		}
 		
+		CubicSegmentCurve dx() const {
+			CubicSegmentCurve result{*this};
+			result.first.y = result.last.y = 0;
+			for (auto &s : result._segments) {
+				s = s.dx();
+			}
+			return result;
+		}
+
 		using Segment = Cubic<Sample>;
 		const std::vector<Segment> & segments() const {
 			return _segments;

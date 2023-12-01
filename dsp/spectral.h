@@ -1,7 +1,8 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_SPECTRAL_H
 #define SIGNALSMITH_DSP_SPECTRAL_H
 
-#include "./common.h"
 #include "./perf.h"
 #include "./fft.h"
 #include "./windows.h"
@@ -212,13 +213,18 @@ namespace spectral {
 			this->_fftSize = fftSize;
 			this->_interval = newInterval;
 			validUntilIndex = -1;
-			
-			using Kaiser = ::signalsmith::windows::Kaiser;
 
-			/// Roughly optimal Kaiser for STFT analysis (forced to perfect reconstruction)
 			auto &window = fft.setSizeWindow(fftSize);
-			auto kaiser = Kaiser::withBandwidth(windowSize/(double)_interval, true);
-			kaiser.fill(window, windowSize);
+			if (windowShape == Window::kaiser) {
+				using Kaiser = ::signalsmith::windows::Kaiser;
+				/// Roughly optimal Kaiser for STFT analysis (forced to perfect reconstruction)
+				auto kaiser = Kaiser::withBandwidth(windowSize/double(_interval), true);
+				kaiser.fill(window, windowSize);
+			} else {
+				using Confined = ::signalsmith::windows::ApproximateConfinedGaussian;
+				auto confined = Confined::withBandwidth(windowSize/double(_interval));
+				confined.fill(window, windowSize);
+			}
 			::signalsmith::windows::forcePerfectReconstruction(window, windowSize, _interval);
 			
 			// TODO: fill extra bits of an input buffer with NaN/Infinity, to break this, and then fix by adding zero-padding to WindowedFFT (as opposed to zero-valued window sections)
@@ -230,10 +236,19 @@ namespace spectral {
 			timeBuffer.resize(fftSize);
 		}
 	public:
+		/** Swaps between the default (Kaiser) shape and Approximate Confined Gaussian (ACG).
+		\diagram{stft-windows.svg,Default (Kaiser) windows and partial cumulative sum}
+		The ACG has better rolloff since its edges go to 0:
+		\diagram{stft-windows-acg.svg,ACG windows and partial cumulative sum}
+		However, it generally has worse performance in terms of total sidelobe energy, affecting worst-case aliasing levels for (most) higher overlap ratios:
+		\diagram{stft-aliasing-simulated-acg.svg,Simulated bad-case aliasing for ACG windows - compare with above}*/
+		enum class Window {kaiser, acg};
+		Window windowShape = Window::kaiser;
+		
 		using Spectrum = MultiSpectrum;
 		Spectrum spectrum;
 		WindowedFFT<Sample> fft;
-
+		
 		STFT() {}
 		/// Parameters passed straight to `.resize()`
 		STFT(int channels, int windowSize, int interval, int historyLength=0, int zeroPadding=0) {

@@ -1,7 +1,8 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_FILTERS_H
 #define SIGNALSMITH_DSP_FILTERS_H
 
-#include "./common.h"
 #include "./perf.h"
 
 #include <cmath>
@@ -54,11 +55,10 @@ namespace filters {
 			double w0, sinW0, cosW0;
 			double inv2Q;
 			
-			FreqSpec(double scaledFreq, BiquadDesign design) {
-				this->scaledFreq = scaledFreq = std::max(1e-6, std::min(0.4999, scaledFreq));
+			FreqSpec(double freq, BiquadDesign design) {
+				scaledFreq = std::max(1e-6, std::min(0.4999, freq));
 				if (design == BiquadDesign::cookbook) {
-					// Falls apart a bit near Nyquist
-					this->scaledFreq = scaledFreq = std::min(0.45, scaledFreq);
+					scaledFreq = std::min(0.45, scaledFreq);
 				}
 				w0 = 2*M_PI*scaledFreq;
 				cosW0 = std::cos(w0);
@@ -107,21 +107,22 @@ namespace filters {
 				double Q = (type == Type::peak ? 0.5*sqrtGain : 0.5)/calc.inv2Q;
 				double q = (type == Type::peak ? 1/sqrtGain : 1)*calc.inv2Q;
 				double expmqw = std::exp(-q*w0);
+				double da1, da2;
 				if (q <= 1) {
-					a1 = -2*expmqw*std::cos(std::sqrt(1 - q*q)*w0);
+					a1 = da1 = -2*expmqw*std::cos(std::sqrt(1 - q*q)*w0);
 				} else {
-					a1 = -2*expmqw*std::cosh(std::sqrt(q*q - 1)*w0);
+					a1 = da1 = -2*expmqw*std::cosh(std::sqrt(q*q - 1)*w0);
 				}
-				a2 = expmqw*expmqw;
+				a2 = da2 = expmqw*expmqw;
 				double sinpd2 = std::sin(w0/2);
 				double p0 = 1 - sinpd2*sinpd2, p1 = sinpd2*sinpd2, p2 = 4*p0*p1;
-				double A0 = 1 + a1 + a2, A1 = 1 - a1 + a2, A2 = -4*a2;
+				double A0 = 1 + da1 + da2, A1 = 1 - da1 + da2, A2 = -4*da2;
 				A0 *= A0;
 				A1 *= A1;
 				if (type == Type::lowpass) {
 					double R1 = (A0*p0 + A1*p1 + A2*p2)*Q*Q;
 					double B0 = A0, B1 = (R1 - B0*p0)/p1;
-					b0 = 0.5*(std::sqrt(B0) + std::sqrt(B1));
+					b0 = 0.5*(std::sqrt(B0) + std::sqrt(std::max(0.0, B1)));
 					b1 = std::sqrt(B0) - b0;
 					b2 = 0;
 					return *this;
@@ -134,17 +135,18 @@ namespace filters {
 					double R2 = -A0 + A1 + 4*(p0 - p1)*A2;
 					double B2 = (R1 - R2*p1)/(4*p1*p1);
 					double B1 = R2 + 4*(p1 - p0)*B2;
-					b1 = -0.5*std::sqrt(B1);
-					b0 = 0.5*(std::sqrt(B2 + 0.25*B1) - b1);
+					b1 = -0.5*std::sqrt(std::max(0.0, B1));
+					b0 = 0.5*(std::sqrt(std::max(0.0, B2 + 0.25*B1)) - b1);
 					b2 = -b0 - b1;
 					return *this;
 				} else if (type == Type::notch) {
 					// The Vicanek paper doesn't cover notches (band-stop), but we know where the zeros should be:
 					b0 = 1;
-					b1 = -2*std::cos(w0);
+					double db1 = -2*std::cos(w0); // might be higher precision
+					b1 = db1;
 					b2 = 1;
 					// Scale so that B0 == A0 to get 0dB at f=0
-					double scale = std::sqrt(A0)/(b0 + b1 + b2);
+					double scale = std::sqrt(A0)/(b0 + db1 + b2);
 					b0 *= scale;
 					b1 *= scale;
 					b2 *= scale;
@@ -156,9 +158,9 @@ namespace filters {
 					double B0 = A0;
 					double B2 = (R1 - R2*p1 - B0)/(4*p1*p1);
 					double B1 = R2 + B0 + 4*(p1 - p0)*B2;
-					double W = 0.5*(std::sqrt(B0) + std::sqrt(B1));
-					b0 = 0.5*(W + std::sqrt(W*W + B2));
-					b1 = 0.5*(std::sqrt(B0) - std::sqrt(B1));
+					double W = 0.5*(std::sqrt(B0) + std::sqrt(std::max(0.0, B1)));
+					b0 = 0.5*(W + std::sqrt(std::max(0.0, W*W + B2)));
+					b1 = 0.5*(std::sqrt(B0) - std::sqrt(std::max(0.0, B1)));
 					b2 = -B2/(4*b0);
 					return *this;
 				}

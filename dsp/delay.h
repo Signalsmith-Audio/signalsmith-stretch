@@ -1,7 +1,7 @@
+#include "./common.h"
+
 #ifndef SIGNALSMITH_DSP_DELAY_H
 #define SIGNALSMITH_DSP_DELAY_H
-
-#include "./common.h"
 
 #include <vector>
 #include <array>
@@ -484,7 +484,8 @@ namespace delay {
 			subSampleSteps = 2*n; // Heuristic again.  Really it depends on the bandwidth as well.
 			double kaiserBandwidth = (stopFreq - passFreq)*(n + 1.0/subSampleSteps);
 			kaiserBandwidth += 1.25/kaiserBandwidth; // We want to place the first zero, but (because using this to window a sinc essentially integrates it in the freq-domain), our ripples (and therefore zeroes) are out of phase.  This is a heuristic fix.
-			
+			double sincScale = M_PI*(passFreq + stopFreq);
+
 			double centreIndex = n*subSampleSteps*0.5, scaleFactor = 1.0/subSampleSteps;
 			std::vector<Sample> windowedSinc(subSampleSteps*n + 1);
 			
@@ -497,7 +498,7 @@ namespace delay {
 					// Exact 0s
 					windowedSinc[i] = 0;
 				} else if (std::abs(x) > 1e-6) {
-					double p = x*M_PI;
+					double p = x*sincScale;
 					windowedSinc[i] *= std::sin(p)/p;
 				}
 			}
