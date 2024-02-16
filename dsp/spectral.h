@@ -33,7 +33,7 @@ namespace spectral {
 
 		std::vector<Sample> fftWindow;
 		std::vector<Sample> timeBuffer;
-		std::vector<Complex> freqBuffer;
+		int offsetSamples = 0;
 	public:
 		/// Returns a fast FFT size <= `size`
 		static int fastSizeAbove(int size, int divisor=1) {
@@ -45,26 +45,27 @@ namespace spectral {
 		}
 
 		WindowedFFT() {}
-		WindowedFFT(int size) {
-			setSize(size);
+		WindowedFFT(int size, int rotateSamples=0) {
+			setSize(size, rotateSamples);
 		}
 		template<class WindowFn>
-		WindowedFFT(int size, WindowFn fn, Sample windowOffset=0.5) {
-			setSize(size, fn, windowOffset);
+		WindowedFFT(int size, WindowFn fn, Sample windowOffset=0.5, int rotateSamples=0) {
+			setSize(size, fn, windowOffset, rotateSamples);
 		}
 
 		/// Sets the size, returning the window for modification (initially all 1s)
-		std::vector<Sample> & setSizeWindow(int size) {
+		std::vector<Sample> & setSizeWindow(int size, int rotateSamples=0) {
 			mrfft.setSize(size);
-			fftWindow.resize(size, 1);
+			fftWindow.assign(size, 1);
 			timeBuffer.resize(size);
-			freqBuffer.resize(size);
+			offsetSamples = rotateSamples;
+			if (offsetSamples < 0) offsetSamples += size; // TODO: for a negative rotation, the other half of the result is inverted
 			return fftWindow;
 		}
 		/// Sets the FFT size, with a user-defined functor for the window
 		template<class WindowFn>
-		void setSize(int size, WindowFn fn, Sample windowOffset=0.5) {
-			setSizeWindow(size);
+		void setSize(int size, WindowFn fn, Sample windowOffset=0.5, int rotateSamples=0) {
+			setSizeWindow(size, rotateSamples);
 		
 			Sample invSize = 1/(Sample)size;
 			for (int i = 0; i < size; ++i) {
@@ -73,12 +74,12 @@ namespace spectral {
 			}
 		}
 		/// Sets the size (using the default Blackman-Harris window)
-		void setSize(int size) {
+		void setSize(int size, int rotateSamples=0) {
 			setSize(size, [](double x) {
 				double phase = 2*M_PI*x;
 				// Blackman-Harris
-				return 0.35875 + 0.48829*std::cos(phase) + 0.14128*std::cos(phase*2) + 0.1168*std::cos(phase*3);
-			});
+				return 0.35875 - 0.48829*std::cos(phase) + 0.14128*std::cos(phase*2) - 0.01168*std::cos(phase*3);
+			}, Sample(0.5), rotateSamples);
 		}
 
 		const std::vector<Sample> & window() const {
@@ -91,17 +92,17 @@ namespace spectral {
 		/// Performs an FFT (with windowing)
 		template<class Input, class Output>
 		void fft(Input &&input, Output &&output) {
-			struct WindowedInput {
-				const Input &input;
-				std::vector<Sample> &window;
-				SIGNALSMITH_INLINE Sample operator [](int i) {
-					return input[i]*window[i];
-				}
-			};
-		
-			mrfft.fft(WindowedInput{input, fftWindow}, output);
+			int fftSize = size();
+			for (int i = 0; i < offsetSamples; ++i) {
+				// Inverted polarity since we're using the MRFFT
+				timeBuffer[i + fftSize - offsetSamples] = -input[i]*fftWindow[i];
+			}
+			for (int i = offsetSamples; i < fftSize; ++i) {
+				timeBuffer[i - offsetSamples] = input[i]*fftWindow[i];
+			}
+			mrfft.fft(timeBuffer, output);
 		}
-		/// Performs an FFT (no windowing)
+		/// Performs an FFT (no windowing or rotation)
 		template<class Input, class Output>
 		void fftRaw(Input &&input, Output &&output) {
 			mrfft.fft(input, output);
@@ -110,14 +111,19 @@ namespace spectral {
 		/// Inverse FFT, with windowing and 1/N scaling
 		template<class Input, class Output>
 		void ifft(Input &&input, Output &&output) {
-			mrfft.ifft(input, output);
-			int size = mrfft.size();
-			Sample norm = 1/(Sample)size;
-			for (int i = 0; i < size; ++i) {
-				output[i] *= norm*fftWindow[i];
+			mrfft.ifft(input, timeBuffer);
+			int fftSize = mrfft.size();
+			Sample norm = 1/(Sample)fftSize;
+
+			for (int i = 0; i < offsetSamples; ++i) {
+				// Inverted polarity since we're using the MRFFT
+				output[i] = -timeBuffer[i + fftSize - offsetSamples]*norm*fftWindow[i];
+			}
+			for (int i = offsetSamples; i < fftSize; ++i) {
+				output[i] = timeBuffer[i - offsetSamples]*norm*fftWindow[i];
 			}
 		}
-		/// Performs an IFFT (no windowing)
+		/// Performs an IFFT (no windowing or rotation)
 		template<class Input, class Output>
 		void ifftRaw(Input &&input, Output &&output) {
 			mrfft.ifft(input, output);
@@ -213,37 +219,48 @@ namespace spectral {
 			this->_fftSize = fftSize;
 			this->_interval = newInterval;
 			validUntilIndex = -1;
-
-			auto &window = fft.setSizeWindow(fftSize);
-			if (windowShape == Window::kaiser) {
-				using Kaiser = ::signalsmith::windows::Kaiser;
-				/// Roughly optimal Kaiser for STFT analysis (forced to perfect reconstruction)
-				auto kaiser = Kaiser::withBandwidth(windowSize/double(_interval), true);
-				kaiser.fill(window, windowSize);
-			} else {
-				using Confined = ::signalsmith::windows::ApproximateConfinedGaussian;
-				auto confined = Confined::withBandwidth(windowSize/double(_interval));
-				confined.fill(window, windowSize);
-			}
-			::signalsmith::windows::forcePerfectReconstruction(window, windowSize, _interval);
 			
-			// TODO: fill extra bits of an input buffer with NaN/Infinity, to break this, and then fix by adding zero-padding to WindowedFFT (as opposed to zero-valued window sections)
-			for (int i = windowSize; i < fftSize; ++i) {
-				window[i] = 0;
-			}
+			setWindow(windowShape);
 
 			spectrum.resize(channels, fftSize/2);
 			timeBuffer.resize(fftSize);
 		}
 	public:
+		enum class Window {kaiser, acg};
+		/// \deprecated use `.setWindow()` which actually updates the window when you change it
+		Window windowShape = Window::kaiser;
+		// for convenience
+		static constexpr Window kaiser = Window::kaiser;
+		static constexpr Window acg = Window::acg;
+		
 		/** Swaps between the default (Kaiser) shape and Approximate Confined Gaussian (ACG).
 		\diagram{stft-windows.svg,Default (Kaiser) windows and partial cumulative sum}
 		The ACG has better rolloff since its edges go to 0:
 		\diagram{stft-windows-acg.svg,ACG windows and partial cumulative sum}
 		However, it generally has worse performance in terms of total sidelobe energy, affecting worst-case aliasing levels for (most) higher overlap ratios:
 		\diagram{stft-aliasing-simulated-acg.svg,Simulated bad-case aliasing for ACG windows - compare with above}*/
-		enum class Window {kaiser, acg};
-		Window windowShape = Window::kaiser;
+		// TODO: these should both be set before resize()
+		void setWindow(Window shape, bool rotateToZero=false) {
+			windowShape = shape;
+
+			auto &window = fft.setSizeWindow(_fftSize, rotateToZero ? _windowSize/2 : 0);
+			if (windowShape == Window::kaiser) {
+				using Kaiser = ::signalsmith::windows::Kaiser;
+				/// Roughly optimal Kaiser for STFT analysis (forced to perfect reconstruction)
+				auto kaiser = Kaiser::withBandwidth(_windowSize/double(_interval), true);
+				kaiser.fill(window, _windowSize);
+			} else {
+				using Confined = ::signalsmith::windows::ApproximateConfinedGaussian;
+				auto confined = Confined::withBandwidth(_windowSize/double(_interval));
+				confined.fill(window, _windowSize);
+			}
+			::signalsmith::windows::forcePerfectReconstruction(window, _windowSize, _interval);
+			
+			// TODO: fill extra bits of an input buffer with NaN/Infinity, to break this, and then fix by adding zero-padding to WindowedFFT (as opposed to zero-valued window sections)
+			for (int i = _windowSize; i < _fftSize; ++i) {
+				window[i] = 0;
+			}
+		}
 		
 		using Spectrum = MultiSpectrum;
 		Spectrum spectrum;
@@ -274,10 +291,11 @@ namespace spectral {
 			return fft.window();
 		}
 		/// Calculates the effective window for the partially-summed future output (relative to the most recent block)
-		std::vector<Sample> partialSumWindow() const {
+		std::vector<Sample> partialSumWindow(bool includeLatestBlock=true) const {
 			const auto &w = window();
 			std::vector<Sample> result(_windowSize, 0);
-			for (int offset = 0; offset < _windowSize; offset += _interval) {
+			int firstOffset = (includeLatestBlock ? 0 : _interval);
+			for (int offset = firstOffset; offset < _windowSize; offset += _interval) {
 				for (int i = 0; i < _windowSize - offset; ++i) {
 					Sample value = w[i + offset];
 					result[i] += value*value;
@@ -328,6 +346,10 @@ namespace spectral {
 		void ensureValid(AnalysisFn fn) {
 			return ensureValid(0, fn);
 		}
+		/// Returns the next invalid index (a.k.a. the index of the next block)
+		int nextInvalid() const {
+			return validUntilIndex + 1;
+		}
 		
 		/** Analyse a multi-channel input, for any type where `data[channel][index]` returns samples
  
@@ -342,7 +364,7 @@ namespace spectral {
 		void analyse(int c, Data &&data) {
 			fft.fft(data, spectrum[c]);
 		}
-		/// Analyse without windowing
+		/// Analyse without windowing or zero-rotation
 		template<class Data>
 		void analyseRaw(Data &&data) {
 			for (int c = 0; c < channels; ++c) {

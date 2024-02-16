@@ -4,7 +4,7 @@
 #include "dsp/spectral.h"
 #include "dsp/delay.h"
 #include "dsp/perf.h"
-SIGNALSMITH_DSP_VERSION_CHECK(1, 3, 3); // Check version is compatible
+SIGNALSMITH_DSP_VERSION_CHECK(1, 6, 0); // Check version is compatible
 #include <vector>
 #include <algorithm>
 #include <functional>
@@ -37,6 +37,7 @@ struct SignalsmithStretch {
 		prevInputOffset = -1;
 		channelBands.assign(channelBands.size(), Band());
 		silenceCounter = 2*stft.windowSize();
+		didSeek = false;
 	}
 
 	// Configures using a default preset
@@ -86,7 +87,24 @@ struct SignalsmithStretch {
 	void setFreqMap(std::function<Sample(Sample)> inputToOutput) {
 		customFreqMap = inputToOutput;
 	}
-	
+
+	// Provide previous input ("pre-roll"), without affecting the speed calculation.  You should ideally feed it one block-length + one interval
+	template<class Inputs>
+	void seek(Inputs &&inputs, int inputSamples, double playbackRate) {
+		inputBuffer.reset();
+		for (int c = 0; c < channels; ++c) {
+			auto &&inputChannel = inputs[c];
+			auto &&bufferChannel = inputBuffer[c];
+			int startIndex = std::max<int>(0, inputSamples - stft.windowSize() - stft.interval());
+			for (int i = startIndex; i < inputSamples; ++i) {
+				bufferChannel[i] = inputChannel[i];
+			}
+		}
+		inputBuffer += inputSamples;
+		didSeek = true;
+		seekTimeFactor = (playbackRate*stft.interval() > 1) ? 1/playbackRate : stft.interval();
+	}
+
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
 		Sample totalEnergy = 0;
@@ -128,7 +146,7 @@ struct SignalsmithStretch {
 				for (int c = 0; c < channels; ++c) {
 					auto &&inputChannel = inputs[c];
 					auto &&bufferChannel = inputBuffer[c];
-					int startIndex = std::max<int>(0, inputSamples - stft.windowSize());
+					int startIndex = std::max<int>(0, inputSamples - stft.windowSize() - stft.interval());
 					for (int i = startIndex; i < inputSamples; ++i) {
 						bufferChannel[i] = inputChannel[i];
 					}
@@ -150,7 +168,7 @@ struct SignalsmithStretch {
 				int inputInterval = inputOffset - prevInputOffset;
 				prevInputOffset = inputOffset;
 
-				bool newSpectrum = (inputInterval > 0);
+				bool newSpectrum = didSeek || (inputInterval > 0);
 				if (newSpectrum) {
 					for (int c = 0; c < channels; ++c) {
 						// Copy from the history buffer, if needed
@@ -174,7 +192,7 @@ struct SignalsmithStretch {
 						}
 					}
 
-					if (inputInterval != stft.interval()) { // make sure the previous input is the correct distance in the past
+					if (didSeek || inputInterval != stft.interval()) { // make sure the previous input is the correct distance in the past
 						int prevIntervalOffset = inputOffset - stft.interval();
 						for (int c = 0; c < channels; ++c) {
 							// Copy from the history buffer, if needed
@@ -199,8 +217,9 @@ struct SignalsmithStretch {
 					}
 				}
 				
-				Sample timeFactor = stft.interval()/std::max<Sample>(1, inputInterval);
+				Sample timeFactor = didSeek ? seekTimeFactor : stft.interval()/std::max<Sample>(1, inputInterval);
 				processSpectrum(newSpectrum, timeFactor);
+				didSeek = false;
 
 				for (int c = 0; c < channels; ++c) {
 					auto channelBands = bandsForChannel(c);
@@ -247,6 +266,8 @@ private:
 	int channels = 0, bands = 0;
 	int prevInputOffset = -1;
 	std::vector<Sample> timeBuffer;
+	bool didSeek = false;
+	Sample seekTimeFactor = 1;
 
 	std::vector<Complex> rotCentreSpectrum, rotPrevInterval;
 	Sample bandToFreq(Sample b) const {
