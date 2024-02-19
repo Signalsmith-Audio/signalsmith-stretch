@@ -38,6 +38,7 @@ struct SignalsmithStretch {
 		channelBands.assign(channelBands.size(), Band());
 		silenceCounter = 2*stft.windowSize();
 		didSeek = false;
+		flushed = true;
 	}
 
 	// Configures using a default preset
@@ -183,6 +184,7 @@ struct SignalsmithStretch {
 						}
 						stft.analyse(c, timeBuffer);
 					}
+					flushed = false; // TODO: first block after a flush should be gain-compensated
 
 					for (int c = 0; c < channels; ++c) {
 						auto channelBands = bandsForChannel(c);
@@ -250,7 +252,37 @@ struct SignalsmithStretch {
 		stft += outputSamples;
 		prevInputOffset -= inputSamples;
 	}
-	
+
+	// Read the remaining output, providing no further input.  `outputSamples` should ideally be at least `.outputLatency()`
+	template<class Outputs>
+	void flush(Outputs &&outputs, int outputSamples) {
+		int plainOutput = std::min<int>(outputSamples, stft.windowSize());
+		int foldedBackOutput = std::min<int>(outputSamples, stft.windowSize() - plainOutput);
+		for (int c = 0; c < channels; ++c) {
+			auto &&outputChannel = outputs[c];
+			auto &&stftChannel = stft[c];
+			for (int i = 0; i < plainOutput; ++i) {
+				// TODO: plain output should be gain-
+				outputChannel[i] = stftChannel[i];
+			}
+			for (int i = 0; i < foldedBackOutput; ++i) {
+				outputChannel[outputSamples - 1 - i] -= stftChannel[plainOutput + i];
+			}
+			for (int i = 0; i < plainOutput + foldedBackOutput; ++i) {
+				stftChannel[i] = 0;
+			}
+		}
+		// Skip the output we just used/cleared
+		stft += plainOutput + foldedBackOutput;
+		// Reset the phase-vocoder stuff, so the next block gets a fresh start
+		for (int c = 0; c < channels; ++c) {
+			auto channelBands = bandsForChannel(c);
+			for (int b = 0; b < bands; ++b) {
+				channelBands[b].prevInput = channelBands[b].prevOutput = 0;
+			}
+		}
+		flushed = true;
+	}
 private:
 	using Complex = std::complex<Sample>;
 	static constexpr Sample noiseFloor{1e-15};
@@ -266,7 +298,7 @@ private:
 	int channels = 0, bands = 0;
 	int prevInputOffset = -1;
 	std::vector<Sample> timeBuffer;
-	bool didSeek = false;
+	bool didSeek = false, flushed = true;
 	Sample seekTimeFactor = 1;
 
 	std::vector<Complex> rotCentreSpectrum, rotPrevInterval;
