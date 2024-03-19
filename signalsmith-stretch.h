@@ -62,7 +62,7 @@ struct SignalsmithStretch {
 		// Various phase rotations
 		rotPrevInterval.assign(bands, 0);
 		timeShiftPhases(-intervalSamples, rotPrevInterval);
-		peaks.reserve(bands);
+		peaks.reserve(bands/2);
 		energy.resize(bands);
 		smoothedEnergy.resize(bands);
 		outputMap.resize(bands);
@@ -127,7 +127,7 @@ struct SignalsmithStretch {
 				if (silenceFirst) {
 					silenceFirst = false;
 					for (auto &b : channelBands) {
-						b.input = b.prevInput = b.output = b.prevOutput = 0;
+						b.input = b.prevInput = b.output = 0;
 						b.inputEnergy = 0;
 					}
 				}
@@ -284,7 +284,7 @@ struct SignalsmithStretch {
 		for (int c = 0; c < channels; ++c) {
 			auto channelBands = bandsForChannel(c);
 			for (int b = 0; b < bands; ++b) {
-				channelBands[b].prevInput = channelBands[b].prevOutput = 0;
+				channelBands[b].prevInput = channelBands[b].output = 0;
 			}
 		}
 		flushed = true;
@@ -323,7 +323,7 @@ private:
 	
 	struct Band {
 		Complex input, prevInput{0};
-		Complex output, prevOutput{0};
+		Complex output{0};
 		Sample inputEnergy;
 	};
 	std::vector<Band> channelBands;
@@ -406,7 +406,7 @@ private:
 				auto bins = bandsForChannel(c);
 				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];
-					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevInterval[b]);
+					bin.output = signalsmith::perf::mul(bin.output, rotPrevInterval[b]);
 					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
 				}
 			}
@@ -447,7 +447,7 @@ private:
 				auto &outputBin = bins[b];
 				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
 				Complex freqTwist = signalsmith::perf::mul<true>(prediction.input, prevInput);
-				Complex phase = signalsmith::perf::mul(outputBin.prevOutput, freqTwist);
+				Complex phase = signalsmith::perf::mul(outputBin.output, freqTwist);
 				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
 
 				if (b > 0) {
@@ -526,11 +526,8 @@ private:
 
 		if (newSpectrum) {
 			for (auto &bin : channelBands) {
-				bin.prevOutput = bin.output;
 				bin.prevInput = bin.input;
 			}
-		} else {
-			for (auto &bin : channelBands) bin.prevOutput = bin.output;
 		}
 	}
 	
