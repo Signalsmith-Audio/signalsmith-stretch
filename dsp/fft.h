@@ -29,7 +29,7 @@ namespace signalsmith { namespace fft {
 		}
 
 		// Complex multiplication has edge-cases around Inf/NaN - handling those properly makes std::complex non-inlineable, so we use our own
-		template <bool conjugateSecond, typename V>
+		template <bool conjugateSecond=false, typename V>
 		SIGNALSMITH_INLINE std::complex<V> complexMul(const std::complex<V> &a, const std::complex<V> &b) {
 			V aReal = complexReal(a), aImag = complexImag(a);
 			V bReal = complexReal(b), bImag = complexImag(b);
@@ -68,6 +68,8 @@ namespace signalsmith { namespace fft {
 				return std::begin(t);
 			}
 		};
+		template<typename T>
+		SIGNALSMITH_AUTO_RETURN(getIterator(T &&t), GetIterator<T>::get(t))
 	}
 
 	/** Floating-point FFT implementation.
@@ -193,7 +195,7 @@ namespace signalsmith { namespace fft {
 			}
 		}
 
-		template<bool inverse, typename RandomAccessIterator>
+		template<typename RandomAccessIterator>
 		void fftStepGeneric(RandomAccessIterator &&origData, const Step &step) {
 			complex *working = workingVector.data();
 			const size_t stride = step.innerRepeats;
@@ -205,14 +207,14 @@ namespace signalsmith { namespace fft {
 				const size_t factor = step.factor;
 				for (size_t repeat = 0; repeat < step.innerRepeats; ++repeat) {
 					for (size_t i = 0; i < step.factor; ++i) {
-						working[i] = _fft_impl::complexMul<inverse>(data[i*stride], twiddles[i]);
+						working[i] = _fft_impl::complexMul(data[i*stride], twiddles[i]);
 					}
 					for (size_t f = 0; f < factor; ++f) {
 						complex sum = working[0];
 						for (size_t i = 1; i < factor; ++i) {
 							double phase = 2*M_PI*f*i/factor;
 							complex twiddle = {V(std::cos(phase)), V(-std::sin(phase))};
-							sum += _fft_impl::complexMul<inverse>(working[i], twiddle);
+							sum += _fft_impl::complexMul(working[i], twiddle);
 						}
 						data[f*stride] = sum;
 					}
@@ -223,7 +225,7 @@ namespace signalsmith { namespace fft {
 			}
 		}
 
-		template<bool inverse, typename RandomAccessIterator>
+		template<typename RandomAccessIterator>
 		SIGNALSMITH_INLINE void fftStep2(RandomAccessIterator &&origData, const Step &step) {
 			const size_t stride = step.innerRepeats;
 			const complex *origTwiddles = twiddleVector.data() + step.twiddleIndex;
@@ -231,7 +233,7 @@ namespace signalsmith { namespace fft {
 				const complex* twiddles = origTwiddles;
 				for (RandomAccessIterator data = origData; data < origData + stride; ++data) {
 					complex A = data[0];
-					complex B = _fft_impl::complexMul<inverse>(data[stride], twiddles[1]);
+					complex B = _fft_impl::complexMul(data[stride], twiddles[1]);
 					
 					data[0] = A + B;
 					data[stride] = A - B;
@@ -241,9 +243,9 @@ namespace signalsmith { namespace fft {
 			}
 		}
 
-		template<bool inverse, typename RandomAccessIterator>
+		template<typename RandomAccessIterator>
 		SIGNALSMITH_INLINE void fftStep3(RandomAccessIterator &&origData, const Step &step) {
-			constexpr complex factor3 = {-0.5, inverse ? 0.8660254037844386 : -0.8660254037844386};
+			constexpr complex factor3 = {-0.5, -0.8660254037844386};
 			const size_t stride = step.innerRepeats;
 			const complex *origTwiddles = twiddleVector.data() + step.twiddleIndex;
 			
@@ -251,8 +253,8 @@ namespace signalsmith { namespace fft {
 				const complex* twiddles = origTwiddles;
 				for (RandomAccessIterator data = origData; data < origData + stride; ++data) {
 					complex A = data[0];
-					complex B = _fft_impl::complexMul<inverse>(data[stride], twiddles[1]);
-					complex C = _fft_impl::complexMul<inverse>(data[stride*2], twiddles[2]);
+					complex B = _fft_impl::complexMul(data[stride], twiddles[1]);
+					complex C = _fft_impl::complexMul(data[stride*2], twiddles[2]);
 					
 					complex realSum = A + (B + C)*factor3.real();
 					complex imagSum = (B - C)*factor3.imag();
@@ -267,7 +269,7 @@ namespace signalsmith { namespace fft {
 			}
 		}
 
-		template<bool inverse, typename RandomAccessIterator>
+		template<typename RandomAccessIterator>
 		SIGNALSMITH_INLINE void fftStep4(RandomAccessIterator &&origData, const Step &step) {
 			const size_t stride = step.innerRepeats;
 			const complex *origTwiddles = twiddleVector.data() + step.twiddleIndex;
@@ -276,17 +278,17 @@ namespace signalsmith { namespace fft {
 				const complex* twiddles = origTwiddles;
 				for (RandomAccessIterator data = origData; data < origData + stride; ++data) {
 					complex A = data[0];
-					complex C = _fft_impl::complexMul<inverse>(data[stride], twiddles[2]);
-					complex B = _fft_impl::complexMul<inverse>(data[stride*2], twiddles[1]);
-					complex D = _fft_impl::complexMul<inverse>(data[stride*3], twiddles[3]);
+					complex C = _fft_impl::complexMul(data[stride], twiddles[2]);
+					complex B = _fft_impl::complexMul(data[stride*2], twiddles[1]);
+					complex D = _fft_impl::complexMul(data[stride*3], twiddles[3]);
 
 					complex sumAC = A + C, sumBD = B + D;
 					complex diffAC = A - C, diffBD = B - D;
 
 					data[0] = sumAC + sumBD;
-					data[stride] = _fft_impl::complexAddI<!inverse>(diffAC, diffBD);
+					data[stride] = _fft_impl::complexAddI<true>(diffAC, diffBD);
 					data[stride*2] = sumAC - sumBD;
-					data[stride*3] = _fft_impl::complexAddI<inverse>(diffAC, diffBD);
+					data[stride*3] = _fft_impl::complexAddI<false>(diffAC, diffBD);
 
 					twiddles += 4;
 				}
@@ -295,32 +297,53 @@ namespace signalsmith { namespace fft {
 		}
 		
 		template<typename InputIterator, typename OutputIterator>
-		void permute(InputIterator input, OutputIterator data) {
-			for (auto pair : permutation) {
-				data[pair.from] = input[pair.to];
+		void permute(bool conjugateFlip, InputIterator input, OutputIterator data) {
+			data[0] = input[0];
+			if (conjugateFlip) {
+				for (size_t i = 1; i < permutation.size(); ++i) {
+					auto &pair = permutation[i];
+					data[pair.from] = input[_size - pair.to];
+				}
+			} else {
+				for (size_t i = 1; i < permutation.size(); ++i) {
+					auto &pair = permutation[i];
+					data[pair.from] = input[pair.to];
+				}
 			}
 		}
 
-		template<bool inverse, typename InputIterator, typename OutputIterator>
-		void run(InputIterator &&input, OutputIterator &&data) {
-			permute(input, data);
+		template<typename InputIterator, typename OutputIterator>
+		struct Task {
+			FFT &fft;
+			bool inverse;
+			InputIterator input;
+			OutputIterator output;
 			
-			for (const Step &step : plan) {
-				switch (step.type) {
-					case StepType::generic:
-						fftStepGeneric<inverse>(data + step.startIndex, step);
-						break;
-					case StepType::step2:
-						fftStep2<inverse>(data + step.startIndex, step);
-						break;
-					case StepType::step3:
-						fftStep3<inverse>(data + step.startIndex, step);
-						break;
-					case StepType::step4:
-						fftStep4<inverse>(data + step.startIndex, step);
-						break;
+			void operator()(int stepIndex) {
+				if (stepIndex == 0) {
+					fft.permute(inverse, input, output);
+				} else {
+					auto &step = fft.plan[stepIndex - 1];
+					switch (step.type) {
+						case StepType::generic:
+							fft.fftStepGeneric(output + step.startIndex, step);
+							break;
+						case StepType::step2:
+							fft.fftStep2(output + step.startIndex, step);
+							break;
+						case StepType::step3:
+							fft.fftStep3(output + step.startIndex, step);
+							break;
+						case StepType::step4:
+							fft.fftStep4(output + step.startIndex, step);
+							break;
+					}
 				}
 			}
+		};
+		template<typename InputIterator, typename OutputIterator>
+		signalsmith::perf::SegmentedTask<Task<InputIterator, OutputIterator>> makeTask(bool inverse, InputIterator &&input, OutputIterator &&output) {
+			return {{*this, inverse, input, output}, int(plan.size() + 1)};
 		}
 
 		static bool validSize(size_t size) {
@@ -380,19 +403,20 @@ namespace signalsmith { namespace fft {
 			return _size;
 		}
 
-		template<typename InputIterator, typename OutputIterator>
-		void fft(InputIterator &&input, OutputIterator &&output) {
-			auto inputIter = _fft_impl::GetIterator<InputIterator>::get(input);
-			auto outputIter = _fft_impl::GetIterator<OutputIterator>::get(output);
-			return run<false>(inputIter, outputIter);
+		template<typename Input, typename Output>
+		void fft(Input &&input, Output &&output) {
+			return task(false, input, output)(1);
 		}
 
-		template<typename InputIterator, typename OutputIterator>
-		void ifft(InputIterator &&input, OutputIterator &&output) {
-			auto inputIter = _fft_impl::GetIterator<InputIterator>::get(input);
-			auto outputIter = _fft_impl::GetIterator<OutputIterator>::get(output);
-			return run<true>(inputIter, outputIter);
+		template<typename Input, typename Output>
+		void ifft(Input &&input, Output &&output) {
+			return task(true, input, output)(1);
 		}
+
+		template<typename Input, typename Output>
+		SIGNALSMITH_AUTO_RETURN(task(bool inverse, Input &&input, Output &&output),
+			makeTask(inverse, _fft_impl::getIterator(input), _fft_impl::getIterator(output))
+		)
 	};
 
 	struct FFTOptions {
@@ -408,6 +432,66 @@ namespace signalsmith { namespace fft {
 		std::vector<complex> twiddlesMinusI;
 		std::vector<complex> modifiedRotations;
 		FFT<V> complexFft;
+
+		template<typename Input>
+		void fftPackInput(Input input) {
+			size_t hSize = complexFft.size();
+			for (size_t i = 0; i < hSize; ++i) {
+				if (modified) {
+					complexBuffer1[i] = _fft_impl::complexMul({input[2*i], input[2*i + 1]}, modifiedRotations[i]);
+				} else {
+					complexBuffer1[i] = {input[2*i], input[2*i + 1]};
+				}
+			}
+		}
+		template<typename Output>
+		void fftOutputBufferfly(Output output) {
+			if (!modified) output[0] = {
+				complexBuffer2[0].real() + complexBuffer2[0].imag(),
+				complexBuffer2[0].real() - complexBuffer2[0].imag()
+			};
+			size_t hSize = complexFft.size();
+			for (size_t i = modified ? 0 : 1; i <= hSize/2; ++i) {
+				size_t conjI = modified ? (hSize  - 1 - i) : (hSize - i);
+				
+				complex odd = (complexBuffer2[i] + conj(complexBuffer2[conjI]))*(V)0.5;
+				complex evenI = (complexBuffer2[i] - conj(complexBuffer2[conjI]))*(V)0.5;
+				complex evenRotMinusI = _fft_impl::complexMul(evenI, twiddlesMinusI[i]);
+
+				output[i] = odd + evenRotMinusI;
+				output[conjI] = conj(odd - evenRotMinusI);
+			}
+		}
+		template<typename Input>
+		void ifftInputBufferfly(Input input) {
+			size_t hSize = complexFft.size();
+			if (!modified) complexBuffer1[0] = {
+				input[0].real() + input[0].imag(),
+				input[0].real() - input[0].imag()
+			};
+			for (size_t i = modified ? 0 : 1; i <= hSize/2; ++i) {
+				size_t conjI = modified ? (hSize  - 1 - i) : (hSize - i);
+				complex v = input[i], v2 = input[conjI];
+
+				complex odd = v + conj(v2);
+				complex evenRotMinusI = v - conj(v2);
+				complex evenI = _fft_impl::complexMul<true>(evenRotMinusI, twiddlesMinusI[i]);
+				
+				complexBuffer1[i] = odd + evenI;
+				complexBuffer1[conjI] = conj(odd - evenI);
+			}
+		}
+		template<typename Output>
+		void ifftUnpackOutput(Output output) {
+			size_t hSize = complexFft.size();
+			for (size_t i = 0; i < hSize; ++i) {
+				complex v = complexBuffer2[i];
+				if (modified) v = _fft_impl::complexMul<true>(v, modifiedRotations[i]);
+				output[2*i] = v.real();
+				output[2*i + 1] = v.imag();
+			}
+		}
+	
 	public:
 		static size_t fastSizeAbove(size_t size) {
 			return FFT<V>::fastSizeAbove((size + 1)/2)*2;
@@ -451,63 +535,43 @@ namespace signalsmith { namespace fft {
 		size_t size() const {
 			return complexFft.size()*2;
 		}
-
-		template<typename InputIterator, typename OutputIterator>
-		void fft(InputIterator &&input, OutputIterator &&output) {
-			size_t hSize = complexFft.size();
-			for (size_t i = 0; i < hSize; ++i) {
-				if (modified) {
-					complexBuffer1[i] = _fft_impl::complexMul<false>({input[2*i], input[2*i + 1]}, modifiedRotations[i]);
-				} else {
-					complexBuffer1[i] = {input[2*i], input[2*i + 1]};
-				}
-			}
-			
-			complexFft.fft(complexBuffer1.data(), complexBuffer2.data());
-			
-			if (!modified) output[0] = {
-				complexBuffer2[0].real() + complexBuffer2[0].imag(),
-				complexBuffer2[0].real() - complexBuffer2[0].imag()
-			};
-			for (size_t i = modified ? 0 : 1; i <= hSize/2; ++i) {
-				size_t conjI = modified ? (hSize  - 1 - i) : (hSize - i);
-				
-				complex odd = (complexBuffer2[i] + conj(complexBuffer2[conjI]))*(V)0.5;
-				complex evenI = (complexBuffer2[i] - conj(complexBuffer2[conjI]))*(V)0.5;
-				complex evenRotMinusI = _fft_impl::complexMul<false>(evenI, twiddlesMinusI[i]);
-
-				output[i] = odd + evenRotMinusI;
-				output[conjI] = conj(odd - evenRotMinusI);
-			}
+		
+		template<typename Input, typename Output>
+		SIGNALSMITH_AUTO_RETURN(fftTask(Input &&input, Output &&output),
+			signalsmith::perf::segmentTask(std::bind(
+				&RealFFT::fftPackInput<decltype(_fft_impl::getIterator(input))>,
+				this,
+				_fft_impl::getIterator(input)
+			), 1)
+			.then(complexFft.task(false, complexBuffer1, complexBuffer2))
+			.then(std::bind(
+				&RealFFT::fftOutputBufferfly<decltype(_fft_impl::getIterator(output))>,
+				this,
+				_fft_impl::getIterator(output)
+			), 1)
+		)
+		template<typename Input, typename Output>
+		void fft(Input &&input, Output &&output) {
+			fftTask(std::forward<Input>(input), std::forward<Output>(output))(1);
 		}
-
-		template<typename InputIterator, typename OutputIterator>
-		void ifft(InputIterator &&input, OutputIterator &&output) {
-			size_t hSize = complexFft.size();
-			if (!modified) complexBuffer1[0] = {
-				input[0].real() + input[0].imag(),
-				input[0].real() - input[0].imag()
-			};
-			for (size_t i = modified ? 0 : 1; i <= hSize/2; ++i) {
-				size_t conjI = modified ? (hSize  - 1 - i) : (hSize - i);
-				complex v = input[i], v2 = input[conjI];
-
-				complex odd = v + conj(v2);
-				complex evenRotMinusI = v - conj(v2);
-				complex evenI = _fft_impl::complexMul<true>(evenRotMinusI, twiddlesMinusI[i]);
-				
-				complexBuffer1[i] = odd + evenI;
-				complexBuffer1[conjI] = conj(odd - evenI);
-			}
-			
-			complexFft.ifft(complexBuffer1.data(), complexBuffer2.data());
-			
-			for (size_t i = 0; i < hSize; ++i) {
-				complex v = complexBuffer2[i];
-				if (modified) v = _fft_impl::complexMul<true>(v, modifiedRotations[i]);
-				output[2*i] = v.real();
-				output[2*i + 1] = v.imag();
-			}
+		
+		template<typename Input, typename Output>
+		SIGNALSMITH_AUTO_RETURN(ifftTask(Input &&input, Output &&output),
+			signalsmith::perf::segmentTask(std::bind(
+				&RealFFT::ifftInputBufferfly<decltype(_fft_impl::getIterator(input))>,
+				this,
+				_fft_impl::getIterator(input)
+			), 1)
+			.then(complexFft.task(true, complexBuffer1, complexBuffer2))
+			.then(std::bind(
+				&RealFFT::ifftUnpackOutput<decltype(_fft_impl::getIterator(output))>,
+				this,
+				_fft_impl::getIterator(output)
+			), 1)
+		)
+		template<typename Input, typename Output>
+		void ifft(Input &&input, Output &&output) {
+			ifftTask(std::forward<Input>(input), std::forward<Output>(output))(1);
 		}
 	};
 

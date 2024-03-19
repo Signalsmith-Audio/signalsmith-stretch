@@ -52,6 +52,7 @@ struct SignalsmithStretch {
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples) {
 		channels = nChannels;
+		stft.setWindow(stft.kaiser, true);
 		stft.resize(channels, blockSamples, intervalSamples);
 		bands = stft.bands();
 		inputBuffer.resize(channels, blockSamples + intervalSamples + 1);
@@ -59,9 +60,7 @@ struct SignalsmithStretch {
 		channelBands.assign(bands*channels, Band());
 		
 		// Various phase rotations
-		rotCentreSpectrum.resize(bands);
 		rotPrevInterval.assign(bands, 0);
-		timeShiftPhases(blockSamples*Sample(-0.5), rotCentreSpectrum);
 		timeShiftPhases(-intervalSamples, rotPrevInterval);
 		peaks.reserve(bands);
 		energy.resize(bands);
@@ -197,7 +196,7 @@ struct SignalsmithStretch {
 						auto channelBands = bandsForChannel(c);
 						auto &&spectrumBands = stft.spectrum[c];
 						for (int b = 0; b < bands; ++b) {
-							channelBands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+							channelBands[b].input = spectrumBands[b];
 						}
 					}
 
@@ -220,7 +219,7 @@ struct SignalsmithStretch {
 							auto channelBands = bandsForChannel(c);
 							auto &&spectrumBands = stft.spectrum[c];
 							for (int b = 0; b < bands; ++b) {
-								channelBands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
+								channelBands[b].prevInput = spectrumBands[b];
 							}
 						}
 					}
@@ -234,7 +233,7 @@ struct SignalsmithStretch {
 					auto channelBands = bandsForChannel(c);
 					auto &&spectrumBands = stft.spectrum[c];
 					for (int b = 0; b < bands; ++b) {
-						spectrumBands[b] = signalsmith::perf::mul<true>(channelBands[b].output, rotCentreSpectrum[b]);
+						spectrumBands[b] = channelBands[b].output;
 					}
 				}
 			});
@@ -308,7 +307,7 @@ private:
 	bool didSeek = false, flushed = true;
 	Sample seekTimeFactor = 1;
 
-	std::vector<Complex> rotCentreSpectrum, rotPrevInterval;
+	std::vector<Complex> rotPrevInterval;
 	Sample bandToFreq(Sample b) const {
 		return (b + Sample(0.5))/stft.fftSize();
 	}

@@ -9,6 +9,11 @@
 #define M_PI 3.14159265358979323846264338327950288
 #endif
 
+// C++11 doesn't have full auto return types, but this is enough
+#ifndef SIGNALSMITH_AUTO_RETURN
+#	define SIGNALSMITH_AUTO_RETURN(signature, expr) auto signature -> decltype(expr) {return expr;}
+#endif
+
 namespace signalsmith {
 	/**	@defgroup Common Common
 		@brief Definitions and helper classes used by the rest of the library

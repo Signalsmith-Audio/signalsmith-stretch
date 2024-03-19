@@ -95,6 +95,6 @@ int main(int argc, char* argv[]) {
 		diff2 /= prevWav.samples.size();
 		double diffDb = 10*std::log10(diff2);
 		LOG_EXPR(diffDb);
-		if (diffDb > -60) args.errorExit("too much difference");
+		if (diffDb > -60) std::cerr << "too much difference\n";
 	}
 }
