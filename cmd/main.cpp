@@ -6,6 +6,7 @@
 #include "../signalsmith-stretch.h"
 #include "util/simple-args.h"
 #include "util/wav.h"
+#include "util/memory-tracker.h"
 
 int main(int argc, char* argv[]) {
 	SimpleArgs args(argc, argv);
@@ -23,14 +24,23 @@ int main(int argc, char* argv[]) {
 	if (!inWav.read(inputWav).warn()) args.errorExit("failed to read WAV");
 	size_t inputLength = inWav.samples.size()/inWav.channels;
 
+	Wav prevWav;
+	prevWav.read(outputWav); // to verify it's the same output
+
 	Wav outWav;
 	outWav.channels = inWav.channels;
 	outWav.sampleRate = inWav.sampleRate;
 	int outputLength = std::round(inputLength*time);
 
+	signalsmith::MemoryTracker memory;
+
+	// Use cheap RNG for comparison
 	signalsmith::stretch::SignalsmithStretch<float, std::mt19937> stretch;
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
+
+	memory = memory.diff();
+	std::cout << "Setup (alloc/free/current):\t" << memory.allocBytes << "/" << memory.freeBytes << "/" << memory.currentBytes << "\n";
 
 	// pad the input at the end, since we'll be reading slightly ahead
 	size_t paddedInputLength = inputLength + stretch.inputLatency();
@@ -40,6 +50,7 @@ int main(int argc, char* argv[]) {
 	int paddedOutputLength = outputLength + tailSamples;
 	outWav.samples.resize(paddedOutputLength*outWav.channels);
 
+	signalsmith::MemoryTracker processMemory;
 	// The simplest way to deal with input latency is to always be slightly ahead in the input
 	stretch.seek(inWav, stretch.inputLatency(), 1/time);
 	
@@ -48,6 +59,9 @@ int main(int argc, char* argv[]) {
 
 	// These lengths in the right ratio to get the time-stretch
 	stretch.process(inWav, inputLength, outWav, outputLength);
+
+	processMemory = processMemory.diff();
+	std::cout << "Processing (alloc/free/current):\t" << processMemory.allocBytes << "/" << processMemory.freeBytes << "/" << processMemory.currentBytes << "\n";
 
 	// Read the last bit of output without giving it any more input
 	outWav.offset += outputLength;
@@ -69,4 +83,18 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
+	
+	if (prevWav.result) {
+		outWav.read(outputWav);
+		if (prevWav.length() != outWav.length()) args.errorExit("lengths differ");
+		double diff2 = 0;
+		for (size_t i = 0; i < prevWav.samples.size(); ++i) {
+			double diff = prevWav.samples[i] - outWav.samples[i];
+			diff2 += diff*diff;
+		}
+		diff2 /= prevWav.samples.size();
+		double diffDb = 10*std::log10(diff2);
+		LOG_EXPR(diffDb);
+		if (diffDb > -60) args.errorExit("too much difference");
+	}
 }
