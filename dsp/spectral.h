@@ -37,11 +37,11 @@ namespace spectral {
 	public:
 		/// Returns a fast FFT size <= `size`
 		static int fastSizeAbove(int size, int divisor=1) {
-			return MRFFT::fastSizeAbove(size/divisor)*divisor;
+			return static_cast<int>(MRFFT::fastSizeAbove(size/divisor)*divisor);
 		}
 		/// Returns a fast FFT size >= `size`
 		static int fastSizeBelow(int size, int divisor=1) {
-			return MRFFT::fastSizeBelow(1 + (size - 1)/divisor)*divisor;
+			return static_cast<int>(MRFFT::fastSizeBelow(1 + (size - 1)/divisor)*divisor);
 		}
 
 		WindowedFFT() {}
@@ -86,7 +86,7 @@ namespace spectral {
 			return this->fftWindow;
 		}
 		int size() const {
-			return mrfft.size();
+			return static_cast<int>(mrfft.size());
 		}
 		
 		/// Performs an FFT (with windowing)
@@ -112,7 +112,7 @@ namespace spectral {
 		template<class Input, class Output>
 		void ifft(Input &&input, Output &&output) {
 			mrfft.ifft(input, timeBuffer);
-			int fftSize = mrfft.size();
+			int fftSize = static_cast<int>(mrfft.size());
 			Sample norm = 1/(Sample)fftSize;
 
 			for (int i = 0; i < offsetSamples; ++i) {
@@ -247,8 +247,8 @@ namespace spectral {
 			if (windowShape == Window::kaiser) {
 				using Kaiser = ::signalsmith::windows::Kaiser;
 				/// Roughly optimal Kaiser for STFT analysis (forced to perfect reconstruction)
-				auto kaiser = Kaiser::withBandwidth(_windowSize/double(_interval), true);
-				kaiser.fill(window, _windowSize);
+				auto kaiserWindow = Kaiser::withBandwidth(_windowSize/double(_interval), true);
+				kaiserWindow.fill(window, _windowSize);
 			} else {
 				using Confined = ::signalsmith::windows::ApproximateConfinedGaussian;
 				auto confined = Confined::withBandwidth(_windowSize/double(_interval));

@@ -43,10 +43,10 @@ struct SignalsmithStretch {
 
 	// Configures using a default preset
 	void presetDefault(int nChannels, Sample sampleRate) {
-		configure(nChannels, sampleRate*0.12, sampleRate*0.03);
+		configure(nChannels, static_cast<int>(sampleRate*0.12), static_cast<int>(sampleRate*0.03));
 	}
 	void presetCheaper(int nChannels, Sample sampleRate) {
-		configure(nChannels, sampleRate*0.1, sampleRate*0.04);
+		configure(nChannels, static_cast<int>(sampleRate*0.1), static_cast<int>(sampleRate*0.04));
 	}
 
 	// Manual setup
@@ -62,7 +62,7 @@ struct SignalsmithStretch {
 		rotCentreSpectrum.resize(bands);
 		rotPrevInterval.assign(bands, 0);
 		timeShiftPhases(blockSamples*Sample(-0.5), rotCentreSpectrum);
-		timeShiftPhases(-intervalSamples, rotPrevInterval);
+		timeShiftPhases(static_cast<Sample>(-intervalSamples), rotPrevInterval);
 		peaks.reserve(bands);
 		energy.resize(bands);
 		smoothedEnergy.resize(bands);
@@ -81,7 +81,7 @@ struct SignalsmithStretch {
 		customFreqMap = nullptr;
 	}
 	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
-		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
+		setTransposeFactor(std::pow(Sample(2), semitones/12), tonalityLimit);
 		customFreqMap = nullptr;
 	}
 	// Sets a custom frequency map - should be monotonically increasing
@@ -165,7 +165,7 @@ struct SignalsmithStretch {
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
 			stft.ensureValid(outputIndex, [&](int outputOffset) {
 				// Time to process a spectrum!  Where should it come from in the input?
-				int inputOffset = std::round(outputOffset*Sample(inputSamples)/outputSamples) - stft.windowSize();
+				int inputOffset = static_cast<int>(std::round(outputOffset*Sample(inputSamples)/outputSamples) - stft.windowSize());
 				int inputInterval = inputOffset - prevInputOffset;
 				prevInputOffset = inputOffset;
 
@@ -219,7 +219,7 @@ struct SignalsmithStretch {
 					}
 				}
 				
-				Sample timeFactor = didSeek ? seekTimeFactor : stft.interval()/std::max<Sample>(1, inputInterval);
+				Sample timeFactor = didSeek ? seekTimeFactor : stft.interval()/static_cast<Sample>(std::max(1, inputInterval));
 				processSpectrum(newSpectrum, timeFactor);
 				didSeek = false;
 
@@ -285,7 +285,7 @@ struct SignalsmithStretch {
 	}
 private:
 	using Complex = std::complex<Sample>;
-	static constexpr Sample noiseFloor{1e-15};
+	static constexpr Sample noiseFloor{Sample(1e-15)};
 	static constexpr Sample maxCleanStretch{2}; // time-stretch ratio before we start randomising phases
 	int silenceCounter = 0;
 	bool silenceFirst = true;
@@ -310,7 +310,7 @@ private:
 	}
 	void timeShiftPhases(Sample shiftSamples, std::vector<Complex> &output) const {
 		for (int b = 0; b < bands; ++b) {
-			Sample phase = bandToFreq(b)*shiftSamples*Sample(-2*M_PI);
+			Sample phase = bandToFreq(static_cast<Sample>(b))*shiftSamples*Sample(-2*M_PI);
 			output[b] = {std::cos(phase), std::sin(phase)};
 		}
 	}
@@ -337,7 +337,7 @@ private:
 	}
 	template<Complex Band::*member>
 	Complex getFractional(int channel, Sample inputIndex) {
-		int lowIndex = std::floor(inputIndex);
+		int lowIndex = static_cast<int>(std::floor(inputIndex));
 		Sample fracIndex = inputIndex - lowIndex;
 		return getFractional<member>(channel, lowIndex, fracIndex);
 	}
@@ -407,7 +407,7 @@ private:
 		}
 
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
-		int longVerticalStep = std::round(smoothingBins);
+		int longVerticalStep = static_cast<int>(std::round(smoothingBins));
 		if (customFreqMap || freqMultiplier != 1) {
 			findPeaks(smoothingBins);
 			updateOutputMap();
@@ -429,7 +429,7 @@ private:
 			auto *predictions = predictionsForChannel(c);
 			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
-				int lowIndex = std::floor(mapPoint.inputBin);
+				int lowIndex = static_cast<int>(std::floor(mapPoint.inputBin));
 				Sample fracIndex = mapPoint.inputBin - lowIndex;
 
 				Prediction &prediction = predictions[b];
@@ -599,7 +599,7 @@ private:
 			return;
 		}
 		Sample bottomOffset = peaks[0].input - peaks[0].output;
-		for (int b = 0; b < std::min<int>(bands, std::ceil(peaks[0].output)); ++b) {
+		for (int b = 0; b < std::min(bands, static_cast<int>(std::ceil(peaks[0].output))); ++b) {
 			outputMap[b] = {b + bottomOffset, 1};
 		}
 		// Interpolate between points
@@ -609,8 +609,8 @@ private:
 			Sample outOffset = prev.input - prev.output;
 			Sample outScale = next.input - next.output - prev.input + prev.output;
 			Sample gradScale = outScale*rangeScale;
-			int startBin = std::max<int>(0, std::ceil(prev.output));
-			int endBin = std::min<int>(bands, std::ceil(next.output));
+			int startBin = std::max(0, static_cast<int>(std::ceil(prev.output)));
+			int endBin = std::min(bands, static_cast<int>(std::ceil(next.output)));
 			for (int b = startBin; b < endBin; ++b) {
 				Sample r = (b - prev.output)*rangeScale;
 				Sample h = r*r*(3 - 2*r);
@@ -623,7 +623,7 @@ private:
 			}
 		}
 		Sample topOffset = peaks.back().input - peaks.back().output;
-		for (int b = std::max<int>(0, peaks.back().output); b < bands; ++b) {
+		for (int b = std::max(0, static_cast<int>(peaks.back().output)); b < bands; ++b) {
 			outputMap[b] = {b + topOffset, 1};
 		}
 	}
