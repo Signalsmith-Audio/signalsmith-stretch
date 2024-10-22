@@ -93,13 +93,20 @@ struct SignalsmithStretch {
 	template<class Inputs>
 	void seek(Inputs &&inputs, int inputSamples, double playbackRate) {
 		inputBuffer.reset();
+		Sample totalEnergy = 0;
 		for (int c = 0; c < channels; ++c) {
 			auto &&inputChannel = inputs[c];
 			auto &&bufferChannel = inputBuffer[c];
 			int startIndex = std::max<int>(0, inputSamples - stft.windowSize() - stft.interval());
 			for (int i = startIndex; i < inputSamples; ++i) {
-				bufferChannel[i] = inputChannel[i];
+				Sample s = inputChannel[i];
+				totalEnergy += s*s;
+				bufferChannel[i] = s;
 			}
+		}
+		if (totalEnergy >= noiseFloor) {
+			silenceCounter = 0;
+			silenceFirst = true;
 		}
 		inputBuffer += inputSamples;
 		didSeek = true;
