@@ -25,6 +25,13 @@ examples: out/stretch
 	inputs/run-all.sh out/examples/t2- out/stretch --time=2
 	inputs/run-all.sh out/examples/t4- out/stretch --time=4
 
+TEST_WAV ?= "inputs/voice.wav"
+
+dev: out/stretch
+	out/stretch --time=0.8 --semitones=12 $(TEST_WAV) out/shift.wav
+	out/stretch --time=0.8 --semitones=12 --formant-comp $(TEST_WAV) out/shift-fc.wav
+	out/stretch --time=0.8 --semitones=12 --formant-comp --formant=3 $(TEST_WAV) out/shift-fc-f3.wav
+
 clean:
 	rm -rf out
 
@@ -32,5 +39,5 @@ clean:
 
 cmake:
 	# CMAKE_BUILD_TYPE is needed for single-config generators (e.g. Makefiles)
-	cmake -B build -DCMAKE_BUILD_TYPE=Release
-	cmake --build build --config Release
+	cmake -B out/build -DCMAKE_BUILD_TYPE=Release
+	cmake --build out/build --config Release
