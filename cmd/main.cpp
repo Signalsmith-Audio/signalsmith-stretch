@@ -14,12 +14,15 @@ int main(int argc, char* argv[]) {
 	std::string outputWav = args.arg<std::string>("output.wav", "output WAV file");
 	
 	double semitones = args.flag<double>("semitones", "pitch-shift amount", 0);
+	double formants = args.flag<double>("formant", "formant-shift amount (semitones)", 0);
+	bool formantComp = args.hasFlag("formant-comp", "formant compensation");
 	double tonality = args.flag<double>("tonality", "tonality limit (Hz)", 8000);
 	double time = args.flag<double>("time", "time-stretch factor", 1);
 	bool exactLength = args.hasFlag("exact", "trims the start/end so the output has the correct length");
 	args.errorExit();
 
 	Wav inWav;
+	std::cout << inputWav << " -> " << outputWav << "\n";
 	if (!inWav.read(inputWav).warn()) args.errorExit("failed to read WAV");
 	size_t inputLength = inWav.samples.size()/inWav.channels;
 
@@ -31,6 +34,7 @@ int main(int argc, char* argv[]) {
 	signalsmith::stretch::SignalsmithStretch<float> stretch;
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
+	stretch.setFormantSemitones(formants, formantComp);
 
 	// pad the input at the end, since we'll be reading slightly ahead
 	size_t paddedInputLength = inputLength + stretch.inputLatency();

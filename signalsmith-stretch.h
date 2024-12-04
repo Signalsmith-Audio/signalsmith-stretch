@@ -17,7 +17,7 @@ struct SignalsmithStretch {
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
-
+	
 	int blockSamples() const {
 		return stft.windowSize();
 	}
@@ -39,6 +39,7 @@ struct SignalsmithStretch {
 		silenceCounter = 2*stft.windowSize();
 		didSeek = false;
 		flushed = true;
+		freqEstimateWeighted = freqEstimateWeight = 0;
 	}
 
 	// Configures using a default preset
@@ -68,6 +69,7 @@ struct SignalsmithStretch {
 		smoothedEnergy.resize(bands);
 		outputMap.resize(bands);
 		channelPredictions.resize(channels*bands);
+		formantMetric.resize(bands + 2);
 	}
 
 	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
@@ -82,11 +84,18 @@ struct SignalsmithStretch {
 	}
 	void setTransposeSemitones(Sample semitones, Sample tonalityLimit=0) {
 		setTransposeFactor(std::pow(2, semitones/12), tonalityLimit);
-		customFreqMap = nullptr;
 	}
 	// Sets a custom frequency map - should be monotonically increasing
 	void setFreqMap(std::function<Sample(Sample)> inputToOutput) {
 		customFreqMap = inputToOutput;
+	}
+
+	void setFormantFactor(Sample multiplier, bool compensatePitch=false) {
+		formantMultiplier = multiplier;
+		formantCompensation = compensatePitch;
+	}
+	void setFormantSemitones(Sample semitones, bool compensatePitch=false) {
+		setFormantFactor(std::pow(2, semitones/12), compensatePitch);
 	}
 
 	// Provide previous input ("pre-roll"), without affecting the speed calculation.  You should ideally feed it one block-length + one interval
@@ -292,6 +301,9 @@ private:
 
 	Sample freqMultiplier = 1, freqTonalityLimit = 0.5;
 	std::function<Sample(Sample)> customFreqMap = nullptr;
+	
+	bool formantCompensation = false; // compensate for pitch/freq change
+	Sample formantMultiplier = 1;
 
 	signalsmith::spectral::STFT<Sample> stft{0, 1, 1};
 	signalsmith::delay::MultiBuffer<Sample> inputBuffer;
@@ -394,7 +406,7 @@ private:
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
-		
+
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
@@ -408,7 +420,8 @@ private:
 
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
 		int longVerticalStep = std::round(smoothingBins);
-		if (customFreqMap || freqMultiplier != 1) {
+		bool freqChange = customFreqMap || freqMultiplier != 1;
+		if (freqChange) {
 			findPeaks(smoothingBins);
 			updateOutputMap();
 		} else { // we're not pitch-shifting, so no need to find peaks etc.
@@ -421,6 +434,10 @@ private:
 			for (int b = 0; b < bands; ++b) {
 				outputMap[b] = {Sample(b), 1};
 			}
+		}
+		bool processFormants = formantMultiplier != 1 || (formantCompensation && freqChange);
+		if (processFormants) {
+			updateFormants();
 		}
 
 		// Preliminary output prediction from phase-vocoder
@@ -625,6 +642,101 @@ private:
 		Sample topOffset = peaks.back().input - peaks.back().output;
 		for (int b = std::max<int>(0, peaks.back().output); b < bands; ++b) {
 			outputMap[b] = {b + topOffset, 1};
+		}
+	}
+	
+	Sample freqEstimateWeighted = 0;
+	Sample freqEstimateWeight = 0;
+	
+	std::vector<Sample> formantMetric;
+	void updateFormants() {
+		for (auto &e : formantMetric) e = 0;
+		for (int c = 0; c < channels; ++c) {
+			Band *bins = bandsForChannel(c);
+			for (int b = 0; b < bands; ++b) {
+				formantMetric[b] += bins[b].inputEnergy;
+			}
+		}
+		
+		// 3 highest peaks in the input
+		std::array<int, 3> peakIndices{0, 0, 0};
+		for (int b = 1; b < bands - 1; ++b) {
+			Sample e = formantMetric[b];
+			// local maxima only
+			if (e < formantMetric[b - 1] || e <= formantMetric[b + 1]) continue;
+			
+			if (e > formantMetric[peakIndices[0]]) {
+				if (e > formantMetric[peakIndices[1]]) {
+					if (e > formantMetric[peakIndices[2]]) {
+						peakIndices = {peakIndices[1], peakIndices[2], b};
+					} else {
+						peakIndices = {peakIndices[1], b, peakIndices[2]};
+					}
+				} else {
+					peakIndices[0] = b;
+				}
+			}
+		}
+		
+		// VERY rough pitch estimation
+		int peakEstimate = peakIndices[2];
+		if (formantMetric[peakIndices[1]] > formantMetric[peakIndices[2]]*0.1) {
+			int diff = std::abs(peakEstimate - peakIndices[1]);
+			if (diff > peakEstimate/8 && diff < peakEstimate*7/8) peakEstimate = peakEstimate%diff;
+			if (formantMetric[peakIndices[0]] > formantMetric[peakIndices[2]]*0.01) {
+				int diff = std::abs(peakEstimate - peakIndices[0]);
+				if (diff > peakEstimate/8 && diff < peakEstimate*7/8) peakEstimate = peakEstimate%diff;
+			}
+		}
+		Sample weight = formantMetric[peakIndices[2]];
+		// Smooth it out a bit
+		freqEstimateWeighted += (peakEstimate*weight - freqEstimateWeighted)*0.25;
+		freqEstimateWeight += (weight - freqEstimateWeight)*0.25;
+		Sample freqEstimate = freqEstimateWeighted/(freqEstimateWeight + Sample(1e-30));
+	
+		for (int b = 0; b < bands; ++b) {
+			formantMetric[b] = std::sqrt(std::sqrt(formantMetric[b]));
+		}
+		Sample slew = 1/(freqEstimate*0.5 + 1);
+		Sample e = 0;
+		for (int repeat = 0; repeat < 1; ++repeat) {
+			for (int b = bands - 1; b >= 0; --b) {
+				e += (formantMetric[b] - e)*slew;
+				formantMetric[b] = e;
+			}
+			for (int b = 0; b < bands; ++b) {
+				e += (formantMetric[b] - e)*slew;
+				formantMetric[b] = e;
+			}
+		}
+		
+		auto getFormant = [&](Sample band) -> Sample {
+			if (band < 0) return 0;
+			band = std::min<Sample>(band, bands);
+			int floorBand = std::floor(band);
+			Sample fracBand = band - floorBand;
+			Sample low = formantMetric[floorBand], high = formantMetric[floorBand + 1];
+			return low + (high - low)*fracBand;
+		};
+		
+		Sample formantMultiplierInv = 1/formantMultiplier;
+
+		for (int b = 0; b < bands; ++b) {
+			Sample inputF = bandToFreq(b);
+			Sample outputF = formantCompensation ? mapFreq(inputF) : inputF;
+			outputF *= formantMultiplierInv;
+
+			Sample inputE = formantMetric[b];
+			Sample targetE = getFormant(freqToBand(outputF));
+
+			Sample formantRatio = targetE/(inputE + Sample(1e-30));
+			Sample energyRatio = (formantRatio*formantRatio)*(formantRatio*formantRatio);
+
+			for (int c = 0; c < channels; ++c) {
+				Band *bins = bandsForChannel(c);
+				// This is what's used to decide the output energy, so this affects the output
+				bins[b].inputEnergy *= energyRatio;
+			}
 		}
 	}
 };
