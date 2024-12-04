@@ -122,4 +122,4 @@ For convenience, a copy of the library is included (with its own `LICENSE.txt`) 
 
 There's a Web Audio wrapper in `web/` (using WASM/AudioWorklet).  This will remain in-sync with the C++ library.
 
-There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch).
+There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch), and a [Rust wrapper](https://crates.io/crates/signalsmith-stretch) by [Colin Marc](https://github.com/colinmarc/signalsmith-stretch-rs).
