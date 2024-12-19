@@ -28,9 +28,9 @@ examples: out/stretch
 TEST_WAV ?= "inputs/voice.wav"
 
 dev: out/stretch
-	out/stretch --time=0.8 --semitones=12 $(TEST_WAV) out/shift.wav
-	out/stretch --time=0.8 --semitones=12 --formant-comp $(TEST_WAV) out/shift-fc.wav
-	out/stretch --time=0.8 --semitones=12 --formant-comp --formant=3 $(TEST_WAV) out/shift-fc-f3.wav
+	out/stretch --time=0.8 --semitones=10 $(TEST_WAV) out/shift.wav
+	out/stretch --time=0.8 --semitones=10 --formant-comp $(TEST_WAV) out/shift-fc.wav
+	out/stretch --time=0.8 --semitones=10 --formant-comp --formant=3 $(TEST_WAV) out/shift-fc-f3.wav
 
 clean:
 	rm -rf out

@@ -874,7 +874,7 @@ private:
 		for (int b = 0; b < bands; ++b) {
 			formantMetric[b] = std::sqrt(std::sqrt(formantMetric[b]));
 		}
-		Sample slew = 1/(freqEstimate*0.5 + 1);
+		Sample slew = 1/(freqEstimate*0.75 + 1);
 		Sample e = 0;
 		for (int repeat = 0; repeat < 1; ++repeat) {
 			for (int b = bands - 1; b >= 0; --b) {
