@@ -59,9 +59,6 @@ struct SignalsmithStretch {
 		timeBuffer.assign(stft.fftSize(), 0);
 		channelBands.assign(bands*channels, Band());
 		
-		// Various phase rotations
-		rotPrevInterval.assign(bands, 0);
-		timeShiftPhases(-intervalSamples, rotPrevInterval);
 		peaks.reserve(bands/2);
 		energy.resize(bands);
 		smoothedEnergy.resize(bands);
@@ -307,18 +304,11 @@ private:
 	bool didSeek = false, flushed = true;
 	Sample seekTimeFactor = 1;
 
-	std::vector<Complex> rotPrevInterval;
 	Sample bandToFreq(Sample b) const {
 		return (b + Sample(0.5))/stft.fftSize();
 	}
 	Sample freqToBand(Sample f) const {
 		return f*stft.fftSize() - Sample(0.5);
-	}
-	void timeShiftPhases(Sample shiftSamples, std::vector<Complex> &output) const {
-		for (int b = 0; b < bands; ++b) {
-			Sample phase = bandToFreq(b)*shiftSamples*Sample(-2*M_PI);
-			output[b] = {std::cos(phase), std::sin(phase)};
-		}
 	}
 	
 	struct Band {
@@ -403,10 +393,16 @@ private:
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
+
+				Complex rot = std::polar(Sample(1), bandToFreq(0)*stft.interval()*Sample(2*M_PI));
+				Sample freqStep = bandToFreq(1) - bandToFreq(0);
+				Complex rotStep = std::polar(Sample(1), freqStep*stft.interval()*Sample(2*M_PI));
+				
 				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];
-					bin.output = signalsmith::perf::mul(bin.output, rotPrevInterval[b]);
-					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
+					bin.output = signalsmith::perf::mul(bin.output, rot);
+					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rot);
+					rot = signalsmith::perf::mul(rot, rotStep);
 				}
 			}
 		}
