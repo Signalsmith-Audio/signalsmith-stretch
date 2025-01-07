@@ -6,7 +6,8 @@
 #include "../signalsmith-stretch.h"
 #include "util/simple-args.h"
 #include "util/wav.h"
-#include "util/memory-tracker.h"
+
+#include "util/memory-tracker.hxx"
 
 int main(int argc, char* argv[]) {
 	SimpleArgs args(argc, argv);
@@ -40,7 +41,7 @@ int main(int argc, char* argv[]) {
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 
 	memory = memory.diff();
-	std::cout << "Setup (alloc/free/current):\t" << memory.allocBytes << "/" << memory.freeBytes << "/" << memory.currentBytes << "\n";
+	std::cout << "Memory: allocated " << (memory.allocBytes/1000) << "kB, freed " << (memory.freeBytes/1000) << "kB\n";
 
 	// pad the input at the end, since we'll be reading slightly ahead
 	size_t paddedInputLength = inputLength + stretch.inputLatency();
@@ -61,7 +62,10 @@ int main(int argc, char* argv[]) {
 	stretch.process(inWav, inputLength, outWav, outputLength);
 
 	processMemory = processMemory.diff();
-	std::cout << "Processing (alloc/free/current):\t" << processMemory.allocBytes << "/" << processMemory.freeBytes << "/" << processMemory.currentBytes << "\n";
+	if (processMemory.allocBytes + processMemory.freeBytes > 0) {
+		std::cout << "Processing (alloc/free/current):\t" << processMemory.allocBytes << "/" << processMemory.freeBytes << "/" << processMemory.currentBytes << "\n";
+		args.errorExit("allocated during process()");
+	}
 
 	// Read the last bit of output without giving it any more input
 	outWav.offset += outputLength;
