@@ -1,13 +1,17 @@
+#include "util/memory-tracker.hxx"
+
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
+std::ostream& operator<<(std::ostream& output, const signalsmith::MemoryTracker& memory) {
+	output << "{.allocBytes=" << memory.allocBytes << ", .freeBytes=" << memory.freeBytes << ", .current=" << memory.currentBytes << "}";
+	return output;
+}
 
 #include <ctime>
 
 #include "../signalsmith-stretch.h"
 #include "util/simple-args.h"
 #include "util/wav.h"
-
-#include "util/memory-tracker.hxx"
 
 int main(int argc, char* argv[]) {
 	SimpleArgs args(argc, argv);
@@ -24,7 +28,7 @@ int main(int argc, char* argv[]) {
 	Wav inWav;
 	if (!inWav.read(inputWav).warn()) args.errorExit("failed to read WAV");
 	size_t inputLength = inWav.samples.size()/inWav.channels;
-
+	
 	Wav prevWav;
 	prevWav.read(outputWav); // to verify it's the same output
 
@@ -62,7 +66,7 @@ int main(int argc, char* argv[]) {
 	stretch.process(inWav, inputLength, outWav, outputLength);
 
 	processMemory = processMemory.diff();
-	if (processMemory.allocBytes + processMemory.freeBytes > 0) {
+	if (processMemory) {
 		std::cout << "Processing (alloc/free/current):\t" << processMemory.allocBytes << "/" << processMemory.freeBytes << "/" << processMemory.currentBytes << "\n";
 		args.errorExit("allocated during process()");
 	}

@@ -14,6 +14,11 @@ struct MemoryTracker {
 		MemoryTracker now;
 		return {now.allocBytes - allocBytes, now.freeBytes - freeBytes};
 	}
+
+	// Is a `.diff()` result non-zero
+	operator bool() const {
+		return allocBytes > 0 || freeBytes > 0;
+	}
 private:
 	MemoryTracker(size_t allocBytes, size_t freeBytes) : allocBytes(allocBytes), freeBytes(freeBytes), currentBytes(allocBytes - freeBytes) {}
 };

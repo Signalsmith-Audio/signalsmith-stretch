@@ -170,6 +170,7 @@ namespace spectral {
 	*/
 	template<typename Sample>
 	class STFT : public signalsmith::delay::MultiBuffer<Sample> {
+
 		using Super = signalsmith::delay::MultiBuffer<Sample>;
 		using Complex = std::complex<Sample>;
 
@@ -215,7 +216,7 @@ namespace spectral {
 				+ historyLength);
 
 			int fftSize = fft.fastSizeAbove(windowSize + zeroPadding);
-			
+
 			this->channels = newChannels;
 			_windowSize = windowSize;
 			this->_fftSize = fftSize;
