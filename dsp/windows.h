@@ -158,7 +158,7 @@ namespace windows {
 			for (int i = 0; i < size; ++i) {
 				double r = (2*i + 1)*invSize - 1;
 				double arg = std::sqrt(1 - r*r);
-				data[i] = bessel0(beta*arg)*invB0;
+				data[i] = static_cast<std::remove_reference<decltype(data[i])>::type>(bessel0(beta*arg)*invB0);
 			}
 		}
 	};
@@ -191,7 +191,7 @@ namespace windows {
 			double norm = 1/(gaussian(0) - 2*offsetScale*(gaussian(2)));
 			for (int i = 0; i < size; ++i) {
 				double r = (2*i + 1)*invSize - 1;
-				data[i] = norm*(gaussian(r) - offsetScale*(gaussian(r - 2) + gaussian(r + 2)));
+				data[i] = static_cast<std::remove_reference<decltype(data[i])>::type>(norm*(gaussian(r) - offsetScale*(gaussian(r - 2) + gaussian(r + 2))));
 			}
 		}
 	};
@@ -209,7 +209,7 @@ namespace windows {
 			}
 			double factor = 1/std::sqrt(sum2);
 			for (int index = i; index < windowLength; index += interval) {
-				data[index] *= factor;
+				data[index] = static_cast<std::remove_reference<decltype(data[index])>::type>(data[index] * factor);
 			}
 		}
 	}
