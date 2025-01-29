@@ -3,7 +3,9 @@
 #if !defined(__has_include) || !__has_include(<dlfcn.h>)
 // Fallback if we don't have <dlfcn.h>, which we use to get the existing methods
 signalsmith::MemoryTracker::MemoryTracker() : signalsmith::MemoryTracker::MemoryTracker(0, 0) {}
+const bool signalsmith::MemoryTracker::implemented = false;
 #else
+const bool signalsmith::MemoryTracker::implemented = true;
 
 #include <cstdlib>
 #include <cstddef>

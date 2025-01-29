@@ -1,9 +1,8 @@
+#include "util/stopwatch.h"
 #include "util/memory-tracker.hxx"
 
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
-
-#include <ctime>
 
 #include "../signalsmith-stretch.h"
 #include "util/simple-args.h"
@@ -20,6 +19,11 @@ int main(int argc, char* argv[]) {
 	double time = args.flag<double>("time", "time-stretch factor", 1);
 	bool exactLength = args.hasFlag("exact", "trims the start/end so the output has the correct length");
 	args.errorExit();
+	
+	std::cout << Console::Bright << inputWav << Console::Reset;
+	std::cout << " -> ";
+	std::cout << Console::Bright << outputWav << Console::Reset << "\n";
+	std::cout << "\tsemitones: " << semitones << "\n\t     time: " << time << "x" << (exactLength ? " (exact)" : "") << "\n\t tonality: " << tonality << "Hz\n";
 
 	Wav inWav;
 	if (!inWav.read(inputWav).warn()) args.errorExit("failed to read WAV");
@@ -37,15 +41,20 @@ int main(int argc, char* argv[]) {
 	outWav.sampleRate = inWav.sampleRate;
 	int outputLength = std::round(inputLength*time);
 
-	signalsmith::MemoryTracker memory;
+	signalsmith::MemoryTracker initMemory;
+	signalsmith::Stopwatch stopwatch;
 
-	// Use cheap RNG for comparison
-	signalsmith::stretch::SignalsmithStretch<float, std::mt19937> stretch;
+	stopwatch.start();
+	signalsmith::stretch::SignalsmithStretch<float/*, std::mt19937*/> stretch; // optional cheaper RNG for performance comparison
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
+	double initSeconds = stopwatch.seconds(stopwatch.lap());
 
-	memory = memory.diff();
-	std::cout << "Memory: allocated " << (memory.allocBytes/1000) << "kB, freed " << (memory.freeBytes/1000) << "kB\n";
+	initMemory = initMemory.diff();
+	std::cout << "Setup:\n\t" << initSeconds << "s\n";
+	if (initMemory.implemented) {
+		std::cout << "\tallocated " << (initMemory.allocBytes/1000) << "kB, freed " << (initMemory.freeBytes/1000) << "kB\n";
+	}
 
 	// pad the input at the end, since we'll be reading slightly ahead
 	size_t paddedInputLength = inputLength + stretch.inputLatency();
@@ -56,29 +65,31 @@ int main(int argc, char* argv[]) {
 	outWav.samples.resize(paddedOutputLength*outWav.channels);
 
 	signalsmith::MemoryTracker processMemory;
-	// The simplest way to deal with input latency is to always be slightly ahead in the input
+
+	stopwatch.start();
+	// The simplest way to deal with input latency (when have access to the audio buffer) is to always be slightly ahead in the input
 	stretch.seek(inWav, stretch.inputLatency(), 1/time);
-	
-	// Process it all in one call, although it works just the same if we split into smaller blocks
 	inWav.offset += stretch.inputLatency();
-
-	// These lengths in the right ratio to get the time-stretch
+	// Process it all in one call, although it works just the same if we split into smaller blocks
 	stretch.process(inWav, inputLength, outWav, outputLength);
-
-	processMemory = processMemory.diff();
-	if (processMemory) {
-		std::cout << "Processing (alloc/free/current):\t" << processMemory.allocBytes << "/" << processMemory.freeBytes << "/" << processMemory.currentBytes << "\n";
-		args.errorExit("allocated during process()");
-	}
-
 	// Read the last bit of output without giving it any more input
 	outWav.offset += outputLength;
 	stretch.flush(outWav, tailSamples);
 	outWav.offset -= outputLength;
+
+	double processSeconds = stopwatch.seconds(stopwatch.lap());
+	double processRate = (inWav.length()/inWav.sampleRate)/processSeconds;
+	double processPercent = 100/processRate;
+	processMemory = processMemory.diff();
+	std::cout << "Process:\n\t" << processSeconds << "s, " << processRate << "x realtime, " << processPercent << "% CPU\n";
+	if (processMemory.implemented) {
+		std::cout << "\tallocated " << (processMemory.allocBytes/1000) << "kB, freed " << (processMemory.freeBytes/1000) << "kB\n";
+		if (processMemory) args.errorExit("allocated during process()");
+	}
 	
 	if (exactLength) {
 		// The start has some extra output - we could just trim it, but we might as well fold it back into the output
-		for (int c = 0; c < outWav.channels; ++c) {
+		for (size_t c = 0; c < outWav.channels; ++c) {
 			for (int i = 0; i < stretch.outputLatency(); ++i) {
 				double trimmed = outWav[stretch.outputLatency() - 1 - i][c];
 				outWav[stretch.outputLatency() + i][c] -= trimmed; // reversed in time and negated

@@ -7,6 +7,8 @@
 namespace signalsmith {
 
 struct MemoryTracker {
+	static const bool implemented; // Whether the implementation actually tracks memory or not
+
 	size_t allocBytes, freeBytes, currentBytes;
 	MemoryTracker();
 	
