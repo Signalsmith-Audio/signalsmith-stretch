@@ -14,6 +14,7 @@ namespace signalsmith { namespace stretch {
 
 template<typename Sample=float, class RandomEngine=std::default_random_engine>
 struct SignalsmithStretch {
+	static constexpr size_t version[3] = {1, 1, 0};
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
