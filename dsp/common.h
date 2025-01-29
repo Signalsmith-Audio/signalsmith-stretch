@@ -2,16 +2,11 @@
 #define SIGNALSMITH_DSP_COMMON_H
 
 #if defined(__FAST_MATH__) && (__apple_build_version__ >= 16000000) && (__apple_build_version__ <= 16000099)
-#	error Apple Clang 16.0.0 is broken, and generates completely incorrect code for some SIMD operations. -ffast-math makes it worse, so if you HAVE to use this version of Clang, you can't enable -ffast-math.
+#	error Apple Clang 16.0.0 generates incorrect SIMD for ARM. If you HAVE to use this version of Clang, turn off -ffast-math.
 #endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846264338327950288
-#endif
-
-// C++11 doesn't have full auto return types, but this is enough
-#ifndef SIGNALSMITH_AUTO_RETURN
-#	define SIGNALSMITH_AUTO_RETURN(signature, expr) auto signature -> decltype(expr) {return expr;}
 #endif
 
 namespace signalsmith {
@@ -24,8 +19,8 @@ namespace signalsmith {
 
 #define SIGNALSMITH_DSP_VERSION_MAJOR 1
 #define SIGNALSMITH_DSP_VERSION_MINOR 6
-#define SIGNALSMITH_DSP_VERSION_PATCH 0
-#define SIGNALSMITH_DSP_VERSION_STRING "1.6.0"
+#define SIGNALSMITH_DSP_VERSION_PATCH 1
+#define SIGNALSMITH_DSP_VERSION_STRING "1.6.1"
 
 	/** Version compatability check.
 	\code{.cpp}
@@ -48,5 +43,5 @@ namespace signalsmith {
 } // signalsmith::
 #else
 // If we've already included it, check it's the same version
-static_assert(SIGNALSMITH_DSP_VERSION_MAJOR == 1 && SIGNALSMITH_DSP_VERSION_MINOR == 6 && SIGNALSMITH_DSP_VERSION_PATCH == 0, "multiple versions of the Signalsmith DSP library");
+static_assert(SIGNALSMITH_DSP_VERSION_MAJOR == 1 && SIGNALSMITH_DSP_VERSION_MINOR == 6 && SIGNALSMITH_DSP_VERSION_PATCH == 1, "multiple versions of the Signalsmith DSP library");
 #endif // include guard

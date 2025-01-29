@@ -28,5 +28,5 @@ clean:
 ### Example use of CMake
 
 cmake:
-	cmake -B build -G Xcode -D CMAKE_RUNTIME_OUTPUT_DIRECTORY=../out
+	cmake -B build -G Xcode
 	cmake --build build --config Release

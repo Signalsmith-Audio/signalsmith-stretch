@@ -4,7 +4,6 @@
 #define SIGNALSMITH_DSP_PERF_H
 
 #include <complex>
-#include <functional>
 
 #if defined(__SSE__) || defined(_M_X64)
 #	include <xmmintrin.h>
@@ -78,59 +77,6 @@ namespace perf {
 #	endif
 	class StopDenormals {}; // FIXME: add for other architectures
 #endif
-
-	/// Packs a "runner" lambda into an object that can be called repeatedly to do work in chunks
-	template<class BoundFn>
-	class SegmentedTask {
-		BoundFn fn;
-		int steps;
-		int nextStep = 0;
-		
-		template<class ThenFn>
-		struct Then {
-			int fn1Steps;
-			BoundFn fn1;
-			ThenFn fn2;
-			
-			void operator()(int step) {
-				if (step < fn1Steps) {
-					fn1(step);
-				} else {
-					fn2(step - fn1Steps);
-				}
-			}
-		};
-		template<typename Fn2> // all SegmentedTasks are in cahoots
-		friend class SegmentedTask;
-	public:
-		SegmentedTask(BoundFn fn, int steps) : fn(fn), steps(steps) {}
-	
-		/// Completes the step up to the ratio (0-1)
-		void operator()(float ratio) {
-			int endStep = std::round(ratio*steps);
-			while (nextStep < endStep) {
-				fn(nextStep++);
-			}
-		}
-		
-		void reset() { // So you can run the task again with the same arguments later
-			nextStep = 0;
-		}
-		
-		template<class Fn>
-		SegmentedTask<Then<Fn>> then(SegmentedTask<Fn> next) {
-			return then(next.fn, next.steps);
-		}
-		template<class Fn>
-		SegmentedTask<Then<Fn>> then(Fn nextFn, int nextSteps) {
-			return {{steps, fn, nextFn}, steps + nextSteps};
-		}
-	};
-	template<class BoundFn>
-	auto segmentTask(BoundFn fn, int steps) -> SegmentedTask<BoundFn> {
-		return {fn, steps};
-	}
-	
 
 /** @} */
 }} // signalsmith::perf::
