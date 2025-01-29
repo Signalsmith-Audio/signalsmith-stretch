@@ -1,15 +1,22 @@
 #include "./memory-tracker.h"
 
-static size_t memoryTrackerAllocCounter = 0;
-static size_t memoryTrackerFreeCounter = 0;
-
-signalsmith::MemoryTracker::MemoryTracker() : signalsmith::MemoryTracker::MemoryTracker(memoryTrackerAllocCounter, memoryTrackerFreeCounter) {}
+#if !defined(__has_include) || !__has_include(<dlfcn.h>)
+// Fallback if we don't have <dlfcn.h>, which we use to get the existing methods
+signalsmith::MemoryTracker::MemoryTracker() : signalsmith::MemoryTracker::MemoryTracker(0, 0) {}
+#else
 
 #include <cstdlib>
 #include <cstddef>
 #include <dlfcn.h>
 #include <cassert>
 #include <utility>
+
+namespace signalsmith {
+
+namespace memory_tracker {
+
+static size_t memoryTrackerAllocCounter = 0;
+static size_t memoryTrackerFreeCounter = 0;
 
 static void * (*originalCalloc)(size_t, size_t) = nullptr;
 static void * (*originalMalloc)(size_t) = nullptr;
@@ -31,7 +38,7 @@ auto callOriginal(Fn& fn, const char *symbolName, Args &&...args)
 	return fn(std::forward<Args>(args)...);
 }
 
-static constexpr size_t EXTRA_SIZE = sizeof(std::max_align_t)*2;
+static constexpr size_t extraInfoBytes = sizeof(std::max_align_t)*2;
 void * storeAllocInfo(void *offsetPointer, void *originalPointer, size_t size) {
 	if (!originalPointer) return nullptr;
 	memoryTrackerAllocCounter += size;
@@ -53,34 +60,36 @@ void * getAllocPointer(void *ptr) {
 	return (void *)sizePtr[-1];
 }
 
+}} // namespaces
+
 extern "C" {
 	void * malloc(size_t size) {
-		void *ptr = callOriginal(originalMalloc, "malloc", size + EXTRA_SIZE);
-		return storeAllocInfo((unsigned char *)ptr + EXTRA_SIZE, ptr, size);
+		void *ptr = signalsmith::memory_tracker::callOriginal(signalsmith::memory_tracker::originalMalloc, "malloc", size + signalsmith::memory_tracker::extraInfoBytes);
+		return signalsmith::memory_tracker::storeAllocInfo((unsigned char *)ptr + signalsmith::memory_tracker::extraInfoBytes, ptr, size);
 	}
 
 	void * calloc(size_t size, size_t count) {
-		size_t extraCount = (EXTRA_SIZE + size - 1)/size; // enough extra items to store what we need
-		void *ptr = callOriginal(originalCalloc, "calloc", size, count + extraCount);
-		return storeAllocInfo((unsigned char *)ptr + size*extraCount, ptr, size*count);
+		size_t extraCount = (signalsmith::memory_tracker::extraInfoBytes + size - 1)/size; // enough extra items to store what we need
+		void *ptr = signalsmith::memory_tracker::callOriginal(signalsmith::memory_tracker::originalCalloc, "calloc", size, count + extraCount);
+		return signalsmith::memory_tracker::storeAllocInfo((unsigned char *)ptr + size*extraCount, ptr, size*count);
 	}
 
 	void * realloc(void *ptr, size_t size) {
-		void *originalPtr = getAllocPointer(ptr);
+		void *originalPtr = signalsmith::memory_tracker::getAllocPointer(ptr);
 		auto pointerOffset = (unsigned char *)ptr - (unsigned char *)originalPtr;
-		size_t originalSize = getAllocSize(ptr);
-		memoryTrackerFreeCounter += originalSize;
+		size_t originalSize = signalsmith::memory_tracker::getAllocSize(ptr);
+		signalsmith::memory_tracker::memoryTrackerFreeCounter += originalSize;
 		
-		ptr = callOriginal(originalRealloc, "realloc", originalPtr, size + pointerOffset);
-		return storeAllocInfo((unsigned char *)ptr + pointerOffset, ptr, size);
+		ptr = signalsmith::memory_tracker::callOriginal(signalsmith::memory_tracker::originalRealloc, "realloc", originalPtr, size + pointerOffset);
+		return signalsmith::memory_tracker::storeAllocInfo((unsigned char *)ptr + pointerOffset, ptr, size);
 	}
 
 	void free(void *ptr) {
-		void *originalPtr = getAllocPointer(ptr);
-		size_t originalSize = getAllocSize(ptr);
-		memoryTrackerFreeCounter += originalSize;
+		void *originalPtr = signalsmith::memory_tracker::getAllocPointer(ptr);
+		size_t originalSize = signalsmith::memory_tracker::getAllocSize(ptr);
+		signalsmith::memory_tracker::memoryTrackerFreeCounter += originalSize;
 
-		callOriginal(originalFree, "free", originalPtr);
+		signalsmith::memory_tracker::callOriginal(signalsmith::memory_tracker::originalFree, "free", originalPtr);
 	}
 }
 
@@ -101,3 +110,7 @@ void operator delete(void *ptr) noexcept {
 void operator delete[](void *ptr) noexcept {
 	free(ptr);
 }
+
+signalsmith::MemoryTracker::MemoryTracker() : signalsmith::MemoryTracker::MemoryTracker(signalsmith::memory_tracker::memoryTrackerAllocCounter, signalsmith::memory_tracker::memoryTrackerFreeCounter) {}
+
+#endif // check for <dlfcn.h>

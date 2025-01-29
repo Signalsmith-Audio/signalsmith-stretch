@@ -2,10 +2,6 @@
 
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
-std::ostream& operator<<(std::ostream& output, const signalsmith::MemoryTracker& memory) {
-	output << "{.allocBytes=" << memory.allocBytes << ", .freeBytes=" << memory.freeBytes << ", .current=" << memory.currentBytes << "}";
-	return output;
-}
 
 #include <ctime>
 
@@ -29,8 +25,12 @@ int main(int argc, char* argv[]) {
 	if (!inWav.read(inputWav).warn()) args.errorExit("failed to read WAV");
 	size_t inputLength = inWav.samples.size()/inWav.channels;
 	
-	Wav prevWav;
-	prevWav.read(outputWav); // to verify it's the same output
+	Wav prevWav; // Used during development, to compare against known-good previous render
+	if (!prevWav.read(outputWav + "-reference.wav")) {
+		if (prevWav.read(outputWav)) {
+			prevWav.write(outputWav + "-reference.wav");
+		}
+	}
 
 	Wav outWav;
 	outWav.channels = inWav.channels;
@@ -102,7 +102,7 @@ int main(int argc, char* argv[]) {
 		}
 		diff2 /= prevWav.samples.size();
 		double diffDb = 10*std::log10(diff2);
-		LOG_EXPR(diffDb);
-		if (diffDb > -60) std::cerr << "too much difference\n";
+		std::cout << "Difference from reference: " << diffDb << " dB\n";
+		if (diffDb > -60) args.errorExit("too much difference\n");
 	}
 }

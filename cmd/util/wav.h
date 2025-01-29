@@ -54,14 +54,6 @@ public:
 		std::string reason;
 		
 		Result(Code code, std::string reason="") : code(code), reason(reason) {};
-		Result(const Result &other) = default;
-		Result & operator=(const Result &other) {
-			if (code == Code::OK) {
-				code = other.code;
-				reason = other.reason;
-			}
-			return *this;
-		}
 		// Used to neatly test for success
 		explicit operator bool () const {
 			return code == Code::OK;
