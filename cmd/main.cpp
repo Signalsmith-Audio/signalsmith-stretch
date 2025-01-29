@@ -30,7 +30,8 @@ int main(int argc, char* argv[]) {
 	size_t inputLength = inWav.samples.size()/inWav.channels;
 	
 	Wav prevWav; // Used during development, to compare against known-good previous render
-	if (!prevWav.read(outputWav + "-reference.wav")) {
+	bool compareReference = (time <= 1.6);
+	if (compareReference && !prevWav.read(outputWav + "-reference.wav")) {
 		if (prevWav.read(outputWav)) {
 			prevWav.write(outputWav + "-reference.wav");
 		}
@@ -103,7 +104,7 @@ int main(int argc, char* argv[]) {
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 	
-	if (prevWav.result) {
+	if (compareReference && prevWav.result) {
 		outWav.read(outputWav);
 		if (prevWav.length() != outWav.length()) args.errorExit("lengths differ");
 		double diff2 = 0;
@@ -113,7 +114,11 @@ int main(int argc, char* argv[]) {
 		}
 		diff2 /= prevWav.samples.size();
 		double diffDb = 10*std::log10(diff2);
-		std::cout << "Difference from reference: " << diffDb << " dB\n";
+		std::cout << "Reference:\n\tdifference: ";
+		if (diff2 < 1e-6) std::cout << Console::Red;
+		if (diff2 < 1e-8) std::cout << Console::Yellow;
+		if (diff2 < 1e-10) std::cout << Console::Green;
+		std::cout << Console::Bright << diffDb << Console::Reset << " dB\n";
 		if (diffDb > -60) args.errorExit("too much difference\n");
 	}
 }
