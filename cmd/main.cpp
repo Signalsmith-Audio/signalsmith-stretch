@@ -9,7 +9,14 @@
 #include "util/wav.h"
 
 int main(int argc, char* argv[]) {
+	signalsmith::stretch::SignalsmithStretch<float/*, std::mt19937*/> stretch; // optional cheaper RNG for performance comparison
+
 	SimpleArgs args(argc, argv);
+	
+	if (args.hasFlag("v", "prints the version")) {
+		std::cout << stretch.version[0] << "." << stretch.version[1] << "." << stretch.version[2] << "\n";
+		return 0;
+	}
 	
 	std::string inputWav = args.arg<std::string>("input.wav", "16-bit WAV file");
 	std::string outputWav = args.arg<std::string>("output.wav", "output WAV file");
@@ -46,7 +53,6 @@ int main(int argc, char* argv[]) {
 	signalsmith::Stopwatch stopwatch;
 
 	stopwatch.start();
-	signalsmith::stretch::SignalsmithStretch<float/*, std::mt19937*/> stretch; // optional cheaper RNG for performance comparison
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	double initSeconds = stopwatch.seconds(stopwatch.lap());

@@ -146,3 +146,7 @@ We'd like to particularly thank the following people who sponsored specific feat
 
 * **Metronaut**: web audio (JS/WASM) release
 * **Daniel L Bowling** and the Stanford School of Medicine: web audio improvements
+
+We're also grateful for the following community contributions:
+
+* **Steve MacKinnon** for finding/resolving a bug in `.reset()`

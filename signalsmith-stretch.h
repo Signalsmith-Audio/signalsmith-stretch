@@ -14,7 +14,7 @@ namespace signalsmith { namespace stretch {
 
 template<typename Sample=float, class RandomEngine=std::default_random_engine>
 struct SignalsmithStretch {
-	static constexpr size_t version[3] = {1, 1, 0};
+	static constexpr size_t version[3] = {1, 1, 1};
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
@@ -37,7 +37,7 @@ struct SignalsmithStretch {
 		inputBuffer.reset();
 		prevInputOffset = -1;
 		channelBands.assign(channelBands.size(), Band());
-		silenceCounter = 2*stft.windowSize();
+		silenceCounter = 0;
 		didSeek = false;
 		flushed = true;
 	}
