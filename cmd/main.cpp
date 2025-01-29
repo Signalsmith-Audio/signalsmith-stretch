@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
 	outWav.sampleRate = inWav.sampleRate;
 	int outputLength = std::round(inputLength*time);
 
-	signalsmith::stretch::SignalsmithStretch<float> stretch;
+	signalsmith::stretch::SignalsmithStretch<float, std::mt19937> stretch;
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 

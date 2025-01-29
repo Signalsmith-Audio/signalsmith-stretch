@@ -12,7 +12,7 @@ SIGNALSMITH_DSP_VERSION_CHECK(1, 6, 0); // Check version is compatible
 
 namespace signalsmith { namespace stretch {
 
-template<typename Sample=float>
+template<typename Sample=float, class RandomEngine=std::default_random_engine>
 struct SignalsmithStretch {
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
@@ -394,8 +394,8 @@ private:
 	Prediction * predictionsForChannel(int c) {
 		return channelPredictions.data() + c*bands;
 	}
-	
-	std::default_random_engine randomEngine;
+
+	RandomEngine randomEngine;
 
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
