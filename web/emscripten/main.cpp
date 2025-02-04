@@ -42,7 +42,7 @@ extern "C" {
 		stretch.presetDefault(nChannels, sampleRate);
 	}
 	void EMSCRIPTEN_KEEPALIVE presetCheaper(int nChannels, Sample sampleRate) {
-		stretch.presetDefault(nChannels, sampleRate);
+		stretch.presetCheaper(nChannels, sampleRate);
 	}
 	void EMSCRIPTEN_KEEPALIVE configure(int nChannels, int blockSamples, int intervalSamples) {
 		stretch.configure(nChannels, blockSamples, intervalSamples);
