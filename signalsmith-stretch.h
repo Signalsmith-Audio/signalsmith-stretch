@@ -93,18 +93,21 @@ struct SignalsmithStretch {
 		tmpBuffer.resize(0);
 		tmpBuffer.resize(stft.blockSamples() + stft.defaultInterval());
 
+		int startIndex = std::max<int>(0, inputSamples - int(tmpBuffer.size())); // start position in input
+		int padStart = tmpBuffer.size() - (inputSamples - startIndex); // start position in tmpBuffer
+
 		Sample totalEnergy = 0;
 		for (int c = 0; c < channels; ++c) {
 			auto &&inputChannel = inputs[c];
-			int startIndex = std::max<int>(0, inputSamples - int(tmpBuffer.size()));
 			for (int i = startIndex; i < inputSamples; ++i) {
 				Sample s = inputChannel[i];
 				totalEnergy += s*s;
-				tmpBuffer[i - startIndex] = s;
+				tmpBuffer[i - startIndex + padStart] = s;
 			}
 			
-			stft.writeInput(c, 0, tmpBuffer.size(), tmpBuffer.data());
+			stft.writeInput(c, tmpBuffer.size(), tmpBuffer.data());
 		}
+		stft.moveInput(tmpBuffer.size());
 		if (totalEnergy >= noiseFloor) {
 			silenceCounter = 0;
 			silenceFirst = true;
@@ -127,7 +130,7 @@ struct SignalsmithStretch {
 				}
 				stft.writeInput(c, length, tmpBuffer.data());
 			}
-			stft.moveInput(toIndex - prevCopiedInput);
+			stft.moveInput(length);
 			prevCopiedInput = toIndex;
 		};
 
