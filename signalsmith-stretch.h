@@ -192,7 +192,7 @@ struct SignalsmithStretch {
 
 				bool newSpectrum = didSeek || (inputInterval > 0);
 				if (newSpectrum) {
-					if (didSeek || inputInterval != int(stft.samplesSinceAnalysis())) { // make sure the previous input is the correct distance in the past
+					if (didSeek || inputInterval != int(stft.defaultInterval())) { // make sure the previous input is the correct distance in the past
 						stft.analyse(stft.defaultInterval());
 						// Copy previous analysis to our band objects
 						for (int c = 0; c < channels; ++c) {
