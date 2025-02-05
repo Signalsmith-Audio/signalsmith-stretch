@@ -121,9 +121,14 @@ int main(int argc, char* argv[]) {
 		diff2 /= prevWav.samples.size();
 		double diffDb = 10*std::log10(diff2);
 		std::cout << "Reference:\n\tdifference: ";
-		if (diff2 < 1e-6) std::cout << Console::Red;
-		if (diff2 < 1e-8) std::cout << Console::Yellow;
-		if (diff2 < 1e-10) std::cout << Console::Green;
+		if (diff2 < 1e-6) {
+			std::cout << Console::Yellow;
+		} else if (diff2 < 1e-10) {
+			std::cout << Console::Green;
+		} else {
+			std::cout << Console::Red;
+		}
+		
 		std::cout << Console::Bright << diffDb << Console::Reset << " dB\n";
 		if (diffDb > -60) args.errorExit("too much difference\n");
 	}
