@@ -1,9 +1,15 @@
 all: out/stretch
 
+dev: clean out/stretch
+	mkdir -p out/examples
+	inputs/run-all.sh out/examples/u2- out/stretch --semitones=2
+	cd ../linear/tests; make
+
 out/stretch: ../signalsmith-stretch.h main.cpp util/*.h util/*.hxx ../dsp/*.h
 	mkdir -p out
 	g++ -std=c++11 -O3 -g \
 		-Wall -Wextra -Wfatal-errors -Wpedantic -pedantic-errors \
+		-framework Accelerate -DSIGNALSMITH_USE_ACCELERATE \
 		main.cpp -o out/stretch
 
 # Uses input files from: https://signalsmith-audio.co.uk/code/stretch/inputs.zip
