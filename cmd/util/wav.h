@@ -131,6 +131,7 @@ public:
 		Format format = Format::PCM; // Shouldn't matter, we should always read the `fmt ` chunk before `data`
 		while (!file.eof()) {
 			auto blockType = read32(file), blockLength = read32(file);
+			if (file.eof()) break;
 			if (!hasFormat && blockType == value_fmt) {
 				auto formatInt = read16(file);
 				format = (Format)formatInt;
