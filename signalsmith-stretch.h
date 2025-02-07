@@ -3,16 +3,29 @@
 
 //#include "dsp/spectral.h"
 //#include "dsp/delay.h"
-#include "dsp/perf.h"
-SIGNALSMITH_DSP_VERSION_CHECK(1, 6, 0); // Check version is compatible
+//#include "dsp/perf.h"
+//SIGNALSMITH_DSP_VERSION_CHECK(1, 6, 0); // Check version is compatible
 
-#include "linear/stft.h"
+#include "signalsmith-linear/stft.h" // https://github.com/Signalsmith-Audio/linear
 #include <vector>
 #include <algorithm>
 #include <functional>
 #include <random>
 
 namespace signalsmith { namespace stretch {
+
+namespace _impl {
+	template <bool conjugateSecond=false, typename V>
+	static std::complex<V> mul(const std::complex<V> &a, const std::complex<V> &b) {
+		return conjugateSecond ? std::complex<V>{
+			b.real()*a.real() + b.imag()*a.imag(),
+				b.real()*a.imag() - b.imag()*a.real()
+		} : std::complex<V>{
+			a.real()*b.real() - a.imag()*b.imag(),
+			a.real()*b.imag() + a.imag()*b.real()
+		};
+	}
+}
 
 template<typename Sample=float, class RandomEngine=std::default_random_engine>
 struct SignalsmithStretch {
@@ -385,9 +398,9 @@ private:
 				
 				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];
-					bin.output = signalsmith::perf::mul(bin.output, rot);
-					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rot);
-					rot = signalsmith::perf::mul(rot, rotStep);
+					bin.output = _impl::mul(bin.output, rot);
+					bin.prevInput = _impl::mul(bin.prevInput, rot);
+					rot = _impl::mul(rot, rotStep);
 				}
 			}
 		}
@@ -426,8 +439,8 @@ private:
 
 				auto &outputBin = bins[b];
 				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
-				Complex freqTwist = signalsmith::perf::mul<true>(prediction.input, prevInput);
-				Complex phase = signalsmith::perf::mul(outputBin.output, freqTwist);
+				Complex freqTwist = _impl::mul<true>(prediction.input, prevInput);
+				Complex phase = _impl::mul(outputBin.output, freqTwist);
 				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
 			}
 		}
@@ -457,17 +470,17 @@ private:
 			if (b > 0) {
 				Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
 				Complex downInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - binTimeFactor);
-				Complex shortVerticalTwist = signalsmith::perf::mul<true>(prediction.input, downInput);
+				Complex shortVerticalTwist = _impl::mul<true>(prediction.input, downInput);
 
 				auto &downBin = bins[b - 1];
-				phase += signalsmith::perf::mul(downBin.output, shortVerticalTwist);
+				phase += _impl::mul(downBin.output, shortVerticalTwist);
 				
 				if (b >= longVerticalStep) {
 					Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*binTimeFactor);
-					Complex longVerticalTwist = signalsmith::perf::mul<true>(prediction.input, longDownInput);
+					Complex longVerticalTwist = _impl::mul<true>(prediction.input, longDownInput);
 
 					auto &longDownBin = bins[b - longVerticalStep];
-					phase += signalsmith::perf::mul(longDownBin.output, longVerticalTwist);
+					phase += _impl::mul(longDownBin.output, longVerticalTwist);
 				}
 			}
 			// Downwards vertical steps
@@ -477,20 +490,20 @@ private:
 
 				Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
 				Complex downInput = getFractional<&Band::input>(maxChannel, upMapPoint.inputBin - binTimeFactor);
-				Complex shortVerticalTwist = signalsmith::perf::mul<true>(upPrediction.input, downInput);
+				Complex shortVerticalTwist = _impl::mul<true>(upPrediction.input, downInput);
 
 				auto &upBin = bins[b + 1];
-				phase += signalsmith::perf::mul<true>(upBin.output, shortVerticalTwist);
+				phase += _impl::mul<true>(upBin.output, shortVerticalTwist);
 				
 				if (b < bands - longVerticalStep) {
 					auto &longUpPrediction = predictions[b + longVerticalStep];
 					auto &longUpMapPoint = outputMap[b + longVerticalStep];
 
 					Complex longDownInput = getFractional<&Band::input>(maxChannel, longUpMapPoint.inputBin - longVerticalStep*binTimeFactor);
-					Complex longVerticalTwist = signalsmith::perf::mul<true>(longUpPrediction.input, longDownInput);
+					Complex longVerticalTwist = _impl::mul<true>(longUpPrediction.input, longDownInput);
 
 					auto &longUpBin = bins[b + longVerticalStep];
-					phase += signalsmith::perf::mul<true>(longUpBin.output, longVerticalTwist);
+					phase += _impl::mul<true>(longUpBin.output, longVerticalTwist);
 				}
 			}
 
@@ -502,8 +515,8 @@ private:
 					auto &channelBin = bandsForChannel(c)[b];
 					auto &channelPrediction = predictionsForChannel(c)[b];
 					
-					Complex channelTwist = signalsmith::perf::mul<true>(channelPrediction.input, prediction.input);
-					Complex channelPhase = signalsmith::perf::mul(outputBin.output, channelTwist);
+					Complex channelTwist = _impl::mul<true>(channelPrediction.input, prediction.input);
+					Complex channelPhase = _impl::mul(outputBin.output, channelTwist);
 					channelBin.output = channelPrediction.makeOutput(channelPhase);
 				}
 			}
