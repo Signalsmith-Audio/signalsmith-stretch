@@ -1,12 +1,13 @@
-#include "util/stopwatch.h"
-#include "util/memory-tracker.hxx"
-
+// helper for debugging
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
 
-#include "../signalsmith-stretch.h"
-#include "util/simple-args.h"
-#include "util/wav.h"
+#include "signalsmith-stretch/signalsmith-stretch.h"
+
+#include "./util/stopwatch.h"
+#include "./util/memory-tracker.hxx"
+#include "./util/simple-args.h"
+#include "./util/wav.h"
 
 int main(int argc, char* argv[]) {
 	signalsmith::stretch::SignalsmithStretch<float/*, std::mt19937*/> stretch; // optional cheaper RNG for performance comparison
