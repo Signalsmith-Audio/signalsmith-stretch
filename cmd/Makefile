@@ -1,6 +1,6 @@
 all: out/stretch
 
-out/stretch: main.cpp ../signalsmith-stretch.h util/*.h util/*.hxx ../dsp/*.h
+out/stretch: main.cpp ../signalsmith-stretch.h util/*.h util/*.hxx
 	mkdir -p out
 	g++ -std=c++11 -O3 -g \
 		-Wall -Wextra -Wfatal-errors -Wpedantic -pedantic-errors \
