@@ -10,7 +10,7 @@
 #include "./util/wav.h"
 
 int main(int argc, char* argv[]) {
-	signalsmith::stretch::SignalsmithStretch<float/*, std::mt19937*/> stretch; // optional cheaper RNG for performance comparison
+	signalsmith::stretch::SignalsmithStretch<float/*, std::ranlux48_base*/> stretch; // optional cheaper RNG for performance comparison
 
 	SimpleArgs args(argc, argv);
 	
