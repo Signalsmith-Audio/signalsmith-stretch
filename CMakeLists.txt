@@ -7,7 +7,7 @@ include(FetchContent)
 FetchContent_Declare(
 	signalsmith-linear
 	GIT_REPOSITORY https://github.com/Signalsmith-Audio/linear.git
-	GIT_TAG 321e1280c2cc4d11d3f33e912af3f4d2041583ec
+	GIT_TAG 49500fbae7574785e99eefa4979f9ca265577b50
 	GIT_SHALLOW ON
 )
 FetchContent_MakeAvailable(signalsmith-linear)
