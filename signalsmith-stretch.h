@@ -260,6 +260,7 @@ struct SignalsmithStretch {
 	void flush(Outputs &&outputs, int outputSamples) {
 		int plainOutput = std::min<int>(outputSamples, stft.blockSamples());
 		int foldedBackOutput = std::min<int>(outputSamples, int(stft.blockSamples()) - plainOutput);
+		stft.finishOutput(1);
 		for (int c = 0; c < channels; ++c) {
 			tmpBuffer.resize(plainOutput);
 			stft.readOutput(c, plainOutput, tmpBuffer.data());
