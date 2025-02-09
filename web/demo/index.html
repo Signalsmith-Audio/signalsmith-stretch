@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<title>Signalsmith Stretch Web Audio demo</title>
+		<link rel="stylesheet" href="/style/article/dist.css">
 		<style>
 			#start-overlay {
 				position: fixed;
@@ -22,14 +23,16 @@
 		
 			body {
 				margin: 0;
+				padding: 0;
+				position: fixed;
 				height: 100vh;
 				width: 100vw;
 				max-height: 100vh;
 				max-width: 100vw;
 				display: grid;
-				grid-template-areas: "playback upload" "controls controls" "scope scope";
-				grid-template-columns: 1fr 4rem;
-				grid-template-rows: 2.5rem 1fr calc(min(30vh, 8rem));
+				grid-template-areas: "playstop playback upload" "controls controls controls" "scope scope scope";
+				grid-template-columns: 3rem 1fr max-content;
+				grid-template-rows: 2.5rem 1fr 8rem;
 
 				font-size: 12pt;
 				font-family: Arial, sans-serif;
@@ -38,7 +41,7 @@
 			#controls {
 				grid-area: controls;
 				display: grid;
-				grid-template-columns: 4rem 1fr 5rem;
+				grid-template-columns: max-content 1fr max-content;
 				grid-auto-rows: max-content;
 				padding: 1rem;
 				align-content: space-evenly;
@@ -58,44 +61,60 @@
 			#scope {
 				grid-area: scope;
 				width: 100%;
-				height: 100%;
 				border: none;
+			}
+			#playstop {
+				grid-area: playstop;
 			}
 			#playback {
 				grid-area: playback;
+				height: 100%;
+				position: relative;
+				padding: 0;
+				margin: 0 1rex;
+				accent-color: currentcolor;
+			}
+			#playback::before {
+				content: '';
 				background: #DDD;
+				box-shadow: rgba(0, 0, 0, 0.267) 0px -8px 3px -8px inset, rgba(255, 255, 255, 0.2) 0px 6px 2px -4px inset;
+				position: absolute;
+				left: -1rem;
+				right: -1rem;
+				height: 100%;
+				z-index: -1;
 			}
 			#upload {
 				grid-area: upload;
-				background: #EEE;
-				border: 2px dashed #CCC;
-				border-radius: 4px;
-				cursor: pointer;
 			}
 		</style>
 	</head>
 	<body>
+		<button id="playstop" alt="toggle play">...</button>
 		<input id="playback" type="range" value="0" min="0" max="1" step="0.001">
 		<input id="upload-file" type="file" style="visibility: hidden" accept="audio/*">
 		<button id="upload">upload</button>
 		<div id="controls">
-			<label>active</label>
-			<input type="checkbox" data-key="active">
 			<label>rate</label>
-			<input type="range" min="0" max="4" step="0.01" data-key="rate">
-			<input type="number" min="0" max="4" step="0.01" data-key="rate">
+			<input type="range" min="0" max="4" step="0.01" data-key="rate" class="diagram-blue">
+			<input type="number" min="0" max="4" step="0.01" data-key="rate" class="diagram-blue">
 			<label>semitones</label>
-			<input type="range" min="-12" max="12" step="1" data-key="semitones">
-			<input type="number" min="-12" max="12" step="1" data-key="semitones">
+			<input type="range" min="-12" max="12" step="1" data-key="semitones" class="diagram-red">
+			<input type="number" min="-12" max="12" step="1" data-key="semitones" class="diagram-red">
+<!--
+			<label>tonality limit</label>
+			<input type="range" min="2000" max="20000" step="100" data-key="tonalityHz" class="diagram-red">
+			<input type="number" min="2000" max="20000" step="1" data-key="tonalityHz" class="diagram-red">
 			<label>shelf freq</label>
 			<input type="range" min="4000" max="12000" step="100" data-key="shelfFreq">
 			<input type="number" min="4000" max="12000" step="100" data-key="shelfFreq">
 			<label>shelf dB</label>
 			<input type="range" min="-24" max="12" step="0.1" data-key="shelfDb">
 			<input type="number" min="-24" max="12" step="0.1" data-key="shelfDb">
+-->
 		</div>
 		<script type="module">
-			import SignalsmithStretch from "./release/SignalsmithStretch.mjs";
+			import SignalsmithStretch from "../release/SignalsmithStretch.mjs";
 			import Scope from './Scope.mjs';
 			let $ = document.querySelector.bind(document);
 			let $$ = document.querySelectorAll.bind(document);
@@ -161,10 +180,15 @@
 					active: false,
 					rate: 1,
 					semitones: 0,
+					tonalityHz: 8000,
 					shelfFreq: 8000,
 					shelfDb: 0
 				};
 				let controlValues = Object.assign({}, controlValuesInitial);
+				$('#playstop').onclick = e => {
+					controlValues.active = !controlValues.active;
+					controlsChanged(0.15); // play state schedules slightly in the future because of latency, otherwise it ends up fading in to jump ahead.
+				};
 				$$('#controls input').forEach(input => {
 					let isCheckbox = input.type == 'checkbox';
 					let key = input.dataset.key;
@@ -177,7 +201,10 @@
 						controlsChanged();
 					};
 				});
-				function controlsChanged() {
+				function controlsChanged(scheduleAhead) {
+					let playing = controlValues.active;
+					$('#playstop').innerHTML = '<svg alt="toggle play" height="1em" width="1em" viewbox="0 0 8 8" style="vertical-align:middle"><path d="' + (playing ? 'M1 1L3 1 3 7 1 7ZM5 1 7 1 7 7 5 7Z' : 'M1 0L8 4 1 8') + '" fill="currentColor"/></svg>';
+				
 					$$('#controls input').forEach(input => {
 						let key = input.dataset.key;
 						let value = controlValues[key];
@@ -185,7 +212,7 @@
 						if (value !== parseFloat(input.value)) input.value = value;
 					});
 					if (stretch) {
-						let obj = Object.assign({output: audioContext.currentTime + 0.15}, controlValues);
+						let obj = Object.assign({output: audioContext.currentTime + (scheduleAhead || 0)}, controlValues);
 						stretch.schedule(obj);
 					}
 					filter.type = 'highshelf'; // https://developer.mozilla.org/en-US/docs/Web/API/BiquadFilterNode/type
@@ -211,10 +238,20 @@
 					playbackPosition.max = audioDuration;
 					playbackPosition.value = stretch?.inputTime;
 				}, 100);
-				playbackPosition.oninput = playbackPosition.onchange = e => {
+				let playbackHeld = false;
+				function updatePlaybackPosition(e) {
 					let inputTime = parseFloat(playbackPosition.value);
-					stretch.schedule(Object.assign({input: inputTime}, controlValues));
+					let obj = Object.assign({}, controlValues);
+					if (playbackHeld) obj.rate = 0;
+					stretch.schedule(Object.assign({input: inputTime}, obj));
+				}
+				playbackPosition.onmousedown = e => {
+					playbackHeld = true;
 				};
+				playbackPosition.onmouseup = playbackPosition.onmousecancel = e => {
+					playbackHeld = false;
+				};
+				playbackPosition.oninput = playbackPosition.onchange = updatePlaybackPosition;
 			})();
 		</script>
 	</body>

@@ -1,26 +1,26 @@
 {
-  "name": "signalsmith-stretch",
-  "version": "1.0.0",
-  "description": "JS/WASM release of the Signalsmith Stretch library",
-  "main": "SignalsmithStretch.mjs",
-  "exports": {
-    "import": "./SignalsmithStretch.mjs",
-    "require": "./SignalsmithStretch.js"
-  },
-  "type": "module",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://signalsmith-audio.co.uk/code/stretch.git"
-  },
-  "keywords": [
-    "audio",
-    "pitch",
-    "time",
-    "web-audio"
-  ],
-  "author": "Geraint Luff",
-  "license": "MIT"
+	"name": "signalsmith-stretch",
+	"version": "1.1.1",
+	"description": "JS/WASM release of the Signalsmith Stretch library",
+	"main": "SignalsmithStretch.mjs",
+	"exports": {
+		"import": "./SignalsmithStretch.mjs",
+		"require": "./SignalsmithStretch.js"
+	},
+	"type": "module",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://signalsmith-audio.co.uk/code/stretch.git"
+	},
+	"keywords": [
+		"audio",
+		"pitch",
+		"time",
+		"web-audio"
+	],
+	"author": "Geraint Luff",
+	"license": "MIT"
 }
