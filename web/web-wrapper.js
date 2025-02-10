@@ -26,6 +26,11 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			}];
 			
 			let remoteMethods = {
+				configure: config => {
+					let blockChanged = (config.blockMs != this.config.blockMs || config.intervalMs != this.config.intervalMs);
+					Object.assign(this.config, config);
+					if (config.blockMs && blockChanged) this.configure();
+				},
 				setUpdateInterval: seconds => {
 					this.timeIntervalSamples = sampleRate*seconds;
 				},
@@ -170,8 +175,18 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			});
 		}
 		
+		config = {
+			tonalityHz: 8000
+		};
 		configure() {
-			this.wasmModule._presetDefault(this.channels, sampleRate);
+			if (this.config.blockMs) {
+				let blockSamples = Math.round(this.config.blockMs/1000*sampleRate);
+				let intervalSamples = Math.round((this.config.intervalMs || this.config.blockMs*0.25)/1000*sampleRate);
+				this.wasmModule._configure(this.channels, blockSamples, intervalSamples);
+				this.wasmModule._reset();
+			} else {
+				this.wasmModule._presetDefault(this.channels, sampleRate);
+			}
 			this.updateBuffers();
 			this.inputLatencySeconds = this.wasmModule._inputLatency()/sampleRate;
 			this.outputLatencySeconds = this.wasmModule._outputLatency()/sampleRate;
@@ -210,7 +225,7 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			let currentMapSegment = this.timeMap[0];
 
 			let wasmModule = this.wasmModule;
-			wasmModule._setTransposeSemitones(currentMapSegment.semitones, 8000/sampleRate)
+			wasmModule._setTransposeSemitones(currentMapSegment.semitones, this.config.tonalityHz/sampleRate)
 
 			// Check the input/output channel counts
 			if (outputList[0].length != this.channels) {

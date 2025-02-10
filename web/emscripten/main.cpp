@@ -16,6 +16,8 @@ extern "C" {
 	Sample * EMSCRIPTEN_KEEPALIVE setBuffers(int channels, int length) {
 		buffers.resize(length*channels*2);
 		Sample *data = buffers.data();
+		buffersIn.resize(0);
+		buffersOut.resize(0);
 		for (int c = 0; c < channels; ++c) {
 			buffersIn.push_back(data + length*c);
 			buffersOut.push_back(data + length*(c + channels));
