@@ -76,6 +76,7 @@ int main(int argc, char* argv[]) {
 	double semitones = args.flag<double>("semitones", "pitch-shift amount", 0);
 	double formants = args.flag<double>("formant", "formant-shift amount (semitones)", 0);
 	bool formantComp = args.hasFlag("formant-comp", "formant compensation");
+	double formantBase = args.flag<double>("formant-base", "formant base frequency (Hz, 0=auto)", 0);
 	double tonality = args.flag<double>("tonality", "tonality limit (Hz)", 8000);
 	double time = args.flag<double>("time", "time-stretch factor", 1);
 	bool exactLength = args.hasFlag("exact", "trims the start/end so the output has the correct length");
@@ -112,6 +113,7 @@ int main(int argc, char* argv[]) {
 	stretch.presetDefault(int(inWav.channels), inWav.sampleRate, splitComputation);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	stretch.setFormantSemitones(formants, formantComp);
+	stretch.setFormantBase(formantBase/inWav.sampleRate);
 	double initSeconds = stopwatch.lap();
 
 	initMemory = initMemory.diff();
