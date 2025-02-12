@@ -11,7 +11,8 @@ if ! test -d "${EMSDK_DIR}"
 then
 	echo "SDK not found - cloning from Github"
 	git clone https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
-	cd "${EMSDK_DIR}" && git pull && ./emsdk install latest && ./emsdk activate latest
+	pushd "${EMSDK_DIR}" && git pull && ./emsdk install latest && ./emsdk activate latest
+	popd
 fi
 EMSDK_QUIET=1 . "${EMSDK_DIR}/emsdk_env.sh" \
 	&& emcc --check \
