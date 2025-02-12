@@ -136,9 +136,11 @@ Released under the [MIT License](LICENSE.txt) - get in touch if you need anythin
 
 ## Other environments / languages
 
-There's a Web Audio wrapper in `web/` (using WASM/AudioWorklet).  This will remain in-sync with the C++ library.
+There's a Web Audio release in [`web/`](web/) (WASM/AudioWorklet), also available on [NPM](npmjs.com/package/signalsmith-stretch).
 
-There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch), and a [Rust wrapper](https://crates.io/crates/signalsmith-stretch) by [Colin Marc](https://github.com/colinmarc/signalsmith-stretch-rs).
+There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch).  This is used as the default pitch/time method in [Audiomentations](https://iver56.github.io/audiomentations/).
+
+There's a [Rust wrapper](https://crates.io/crates/signalsmith-stretch) by [Colin Marc](https://github.com/colinmarc/signalsmith-stretch-rs).
 
 ## Thanks
 
