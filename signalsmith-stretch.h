@@ -140,8 +140,12 @@ struct SignalsmithStretch {
 	
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
+#ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_START
+		SIGNALSMITH_STRETCH_PROFILE_PROCESS_START(inputSamples, outputSamples);
+#endif
 		int prevCopiedInput = 0;
 		auto copyInput = [&](int toIndex){
+
 			int length = std::min<int>(stft.blockSamples() + stft.defaultInterval(), toIndex - prevCopiedInput);
 			tmpBuffer.resize(length);
 			int offset = toIndex - length;
@@ -164,6 +168,7 @@ struct SignalsmithStretch {
 				totalEnergy += s*s;
 			}
 		}
+
 		if (totalEnergy < noiseFloor) {
 			if (silenceCounter >= 2*stft.blockSamples()) {
 				if (silenceFirst) { // first block of silence processing
@@ -209,6 +214,9 @@ struct SignalsmithStretch {
 			size_t processToStep = std::min<size_t>(blockProcess.steps, blockProcess.steps*processRatio);
 			while (blockProcess.step < processToStep) {
 				size_t step = blockProcess.step++;
+#ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP
+				SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP(step, blockProcess.steps);
+#endif
 				
 				if (blockProcess.newSpectrum) {
 					if (blockProcess.reanalysePrev) {
@@ -237,7 +245,7 @@ struct SignalsmithStretch {
 					// Analyse latest (stashed) input
 					if (step < stft.analyseSteps()) {
 						stashedInput.swap(stft.input);
-						stft.analyse();
+						stft.analyseStep(step);
 						stashedInput.swap(stft.input);
 						continue;
 					}
@@ -257,7 +265,7 @@ struct SignalsmithStretch {
 				}
 
 				if (step < processSpectrumSteps) {
-					processSpectrum(step, blockProcess.newSpectrum, blockProcess.timeFactor);
+					processSpectrum(step);
 					continue;
 				}
 				step -= processSpectrumSteps;
@@ -279,10 +287,7 @@ struct SignalsmithStretch {
 					stft.synthesiseStep(step);
 					continue;
 				}
-				LOG_EXPR("uh oh");
-				LOG_EXPR(processToStep);
-				LOG_EXPR(blockProcess.steps);
-				LOG_EXPR(blockProcess.step);
+				// This should never happen - something has gone terribly wrong
 				abort();
 			}
 			if (processRatio >= 1) { // we *should* have just written a block, and are now ready to start a new one
@@ -301,9 +306,10 @@ struct SignalsmithStretch {
 				stft.moveOutput(stft.defaultInterval()); // the actual input jumps forward in time by one interval, ready for the synthesis
 
 				blockProcess.newSpectrum = didSeek || (inputInterval > 0);
+				blockProcess.mappedFrequencies = customFreqMap || freqMultiplier != 1;
 				if (blockProcess.newSpectrum) {
-					// make sure the previous input is the correct distance in the past
-					blockProcess.reanalysePrev = didSeek || inputInterval != int(stft.defaultInterval());
+					// make sure the previous input is the correct distance in the past (give or take 1 sample)
+					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
 					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
 
 					// analyse a new input
@@ -312,11 +318,15 @@ struct SignalsmithStretch {
 
 				blockProcess.timeFactor = didSeek ? seekTimeFactor : stft.defaultInterval()/std::max<Sample>(1, inputInterval);
 				didSeek = false;
-				
+
+				updateProcessSpectrumSteps();
 				blockProcess.steps += processSpectrumSteps;
 
 				blockProcess.steps += stft.synthesiseSteps() + 1;
 			}
+#ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
+			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
+#endif
 
 			++blockProcess.samplesSinceLast;
 			stashedOutput.swap(stft.output);
@@ -332,6 +342,9 @@ struct SignalsmithStretch {
 		
 		copyInput(inputSamples);
 		prevInputOffset -= inputSamples;
+#ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_END
+		SIGNALSMITH_STRETCH_PROFILE_PROCESS_END();
+#endif
 	}
 
 	// Read the remaining output, providing no further input.  `outputSamples` should ideally be at least `.outputLatency()`
@@ -372,6 +385,7 @@ private:
 		
 		bool newSpectrum = false;
 		bool reanalysePrev = false;
+		bool mappedFrequencies = false;
 		Sample timeFactor;
 	} blockProcess;
 
@@ -477,195 +491,224 @@ private:
 
 	RandomEngine randomEngine;
 
-	static constexpr size_t processSpectrumSteps = 6;
-	void processSpectrum(size_t step, bool newSpectrum, Sample timeFactor) {
+	size_t processSpectrumSteps = 0;
+	static constexpr size_t splitMainPrediction = 8; // it's just heavy, since we're blending up to 4 different phase predictions
+	void updateProcessSpectrumSteps() {
+		processSpectrumSteps = 0;
+		if (blockProcess.newSpectrum) processSpectrumSteps += channels;
+		if (blockProcess.mappedFrequencies) {
+			processSpectrumSteps += smoothEnergySteps;
+			processSpectrumSteps += 1; // findPeaks
+		}
+		processSpectrumSteps += 1; // updating the output map
+		processSpectrumSteps += channels; // preliminary phase-vocoder prediction
+		processSpectrumSteps += splitMainPrediction;
+		if (blockProcess.newSpectrum) processSpectrumSteps += 1; // .input -> .prevInput
+	}
+	void processSpectrum(size_t step) {
+		Sample timeFactor = blockProcess.timeFactor;
+		
 		Sample smoothingBins = Sample(stft.fftSamples())/stft.defaultInterval();
 		int longVerticalStep = std::round(smoothingBins);
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
 
-		switch(step) {
-			case 1: {
-				if (newSpectrum) {
-					for (int c = 0; c < channels; ++c) {
-						auto bins = bandsForChannel(c);
+		if (blockProcess.newSpectrum) {
+			if (step < size_t(channels)) {
+				int channel = step;
+				auto bins = bandsForChannel(channel);
 
-						Complex rot = std::polar(Sample(1), bandToFreq(0)*stft.defaultInterval()*Sample(2*M_PI));
-						Sample freqStep = bandToFreq(1) - bandToFreq(0);
-						Complex rotStep = std::polar(Sample(1), freqStep*stft.defaultInterval()*Sample(2*M_PI));
-						
-						for (int b = 0; b < bands; ++b) {
-							auto &bin = bins[b];
-							bin.output = _impl::mul(bin.output, rot);
-							bin.prevInput = _impl::mul(bin.prevInput, rot);
-							rot = _impl::mul(rot, rotStep);
-						}
-					}
+				Complex rot = std::polar(Sample(1), bandToFreq(0)*stft.defaultInterval()*Sample(2*M_PI));
+				Sample freqStep = bandToFreq(1) - bandToFreq(0);
+				Complex rotStep = std::polar(Sample(1), freqStep*stft.defaultInterval()*Sample(2*M_PI));
+				 
+				for (int b = 0; b < bands; ++b) {
+					auto &bin = bins[b];
+					bin.output = _impl::mul(bin.output, rot);
+					bin.prevInput = _impl::mul(bin.prevInput, rot);
+					rot = _impl::mul(rot, rotStep);
 				}
 				return;
 			}
-			case 2: {
-				if (customFreqMap || freqMultiplier != 1) {
-					findPeaks(smoothingBins);
-				}
+			step -= channels;
+		}
+		if (blockProcess.mappedFrequencies) {
+			if (step < smoothEnergySteps) {
+				smoothEnergy(step, smoothingBins);
 				return;
 			}
-			case 3: {
-				if (customFreqMap || freqMultiplier != 1) {
-					updateOutputMap();
-				} else { // we're not pitch-shifting, so no need to find peaks etc.
-					for (int c = 0; c < channels; ++c) {
-						Band *bins = bandsForChannel(c);
-						for (int b = 0; b < bands; ++b) {
-							bins[b].inputEnergy = std::norm(bins[b].input);
-						}
-					}
-					for (int b = 0; b < bands; ++b) {
-						outputMap[b] = {Sample(b), 1};
-					}
-				}
+			step -= smoothEnergySteps;
+			if (step-- == 0) {
+				findPeaks();
 				return;
 			}
-			case 4: {
-				// Preliminary output prediction from phase-vocoder
+		}
+		if (step-- == 0) {
+			if (blockProcess.mappedFrequencies) {
+				updateOutputMap();
+			} else { // we're not pitch-shifting, so no need to find peaks etc.
 				for (int c = 0; c < channels; ++c) {
 					Band *bins = bandsForChannel(c);
-					auto *predictions = predictionsForChannel(c);
 					for (int b = 0; b < bands; ++b) {
-						auto mapPoint = outputMap[b];
-						int lowIndex = std::floor(mapPoint.inputBin);
-						Sample fracIndex = mapPoint.inputBin - lowIndex;
-
-						Prediction &prediction = predictions[b];
-						Sample prevEnergy = prediction.energy;
-						prediction.energy = getFractional<&Band::inputEnergy>(c, lowIndex, fracIndex);
-						prediction.energy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
-						prediction.input = getFractional<&Band::input>(c, lowIndex, fracIndex);
-
-						auto &outputBin = bins[b];
-						Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
-						Complex freqTwist = _impl::mul<true>(prediction.input, prevInput);
-						Complex phase = _impl::mul(outputBin.output, freqTwist);
-						outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
+						bins[b].inputEnergy = std::norm(bins[b].input);
 					}
 				}
-				return;
-			}
-			case 5: {
-				// Re-predict using phase differences between frequencies
 				for (int b = 0; b < bands; ++b) {
-					// Find maximum-energy channel and calculate that
-					int maxChannel = 0;
-					Sample maxEnergy = predictionsForChannel(0)[b].energy;
-					for (int c = 1; c < channels; ++c) {
-						Sample e = predictionsForChannel(c)[b].energy;
-						if (e > maxEnergy) {
-							maxChannel = c;
-							maxEnergy = e;
-						}
-					}
-
-					auto *predictions = predictionsForChannel(maxChannel);
-					auto &prediction = predictions[b];
-					auto *bins = bandsForChannel(maxChannel);
-					auto &outputBin = bins[b];
-
-					Complex phase = 0;
-					auto mapPoint = outputMap[b];
-
-					// Upwards vertical steps
-					if (b > 0) {
-						Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
-						Complex downInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - binTimeFactor);
-						Complex shortVerticalTwist = _impl::mul<true>(prediction.input, downInput);
-
-						auto &downBin = bins[b - 1];
-						phase += _impl::mul(downBin.output, shortVerticalTwist);
-						
-						if (b >= longVerticalStep) {
-							Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*binTimeFactor);
-							Complex longVerticalTwist = _impl::mul<true>(prediction.input, longDownInput);
-
-							auto &longDownBin = bins[b - longVerticalStep];
-							phase += _impl::mul(longDownBin.output, longVerticalTwist);
-						}
-					}
-					// Downwards vertical steps
-					if (b < bands - 1) {
-						auto &upPrediction = predictions[b + 1];
-						auto &upMapPoint = outputMap[b + 1];
-
-						Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
-						Complex downInput = getFractional<&Band::input>(maxChannel, upMapPoint.inputBin - binTimeFactor);
-						Complex shortVerticalTwist = _impl::mul<true>(upPrediction.input, downInput);
-
-						auto &upBin = bins[b + 1];
-						phase += _impl::mul<true>(upBin.output, shortVerticalTwist);
-						
-						if (b < bands - longVerticalStep) {
-							auto &longUpPrediction = predictions[b + longVerticalStep];
-							auto &longUpMapPoint = outputMap[b + longVerticalStep];
-
-							Complex longDownInput = getFractional<&Band::input>(maxChannel, longUpMapPoint.inputBin - longVerticalStep*binTimeFactor);
-							Complex longVerticalTwist = _impl::mul<true>(longUpPrediction.input, longDownInput);
-
-							auto &longUpBin = bins[b + longVerticalStep];
-							phase += _impl::mul<true>(longUpBin.output, longVerticalTwist);
-						}
-					}
-
-					outputBin.output = prediction.makeOutput(phase);
-					
-					// All other bins are locked in phase
-					for (int c = 0; c < channels; ++c) {
-						if (c != maxChannel) {
-							auto &channelBin = bandsForChannel(c)[b];
-							auto &channelPrediction = predictionsForChannel(c)[b];
-							
-							Complex channelTwist = _impl::mul<true>(channelPrediction.input, prediction.input);
-							Complex channelPhase = _impl::mul(outputBin.output, channelTwist);
-							channelBin.output = channelPrediction.makeOutput(channelPhase);
-						}
-					}
+					outputMap[b] = {Sample(b), 1};
 				}
-
-				if (newSpectrum) {
-					for (auto &bin : channelBands) {
-						bin.prevInput = bin.input;
-					}
-				}
-				return;
 			}
-		} // switch
+			return;
+		}
+		if (step < size_t(channels)) {
+			size_t c = step;
+			Band *bins = bandsForChannel(c);
+			auto *predictions = predictionsForChannel(c);
+			for (int b = 0; b < bands; ++b) {
+				auto mapPoint = outputMap[b];
+				int lowIndex = std::floor(mapPoint.inputBin);
+				Sample fracIndex = mapPoint.inputBin - lowIndex;
+
+				Prediction &prediction = predictions[b];
+				Sample prevEnergy = prediction.energy;
+				prediction.energy = getFractional<&Band::inputEnergy>(c, lowIndex, fracIndex);
+				prediction.energy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
+				prediction.input = getFractional<&Band::input>(c, lowIndex, fracIndex);
+
+				auto &outputBin = bins[b];
+				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
+				Complex freqTwist = _impl::mul<true>(prediction.input, prevInput);
+				Complex phase = _impl::mul(outputBin.output, freqTwist);
+				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
+			}
+			return;
+		}
+		step -= channels;
+
+		if (step < splitMainPrediction) {
+			// Re-predict using phase differences between frequencies
+			int chunk = step;
+			int startB = bands*chunk/splitMainPrediction;
+			int endB = bands*(chunk + 1)/splitMainPrediction;
+			for (int b = startB; b < endB; ++b) {
+				// Find maximum-energy channel and calculate that
+				int maxChannel = 0;
+				Sample maxEnergy = predictionsForChannel(0)[b].energy;
+				for (int c = 1; c < channels; ++c) {
+					Sample e = predictionsForChannel(c)[b].energy;
+					if (e > maxEnergy) {
+						maxChannel = c;
+						maxEnergy = e;
+					}
+				}
+
+				auto *predictions = predictionsForChannel(maxChannel);
+				auto &prediction = predictions[b];
+				auto *bins = bandsForChannel(maxChannel);
+				auto &outputBin = bins[b];
+
+				Complex phase = 0;
+				auto mapPoint = outputMap[b];
+
+				// Upwards vertical steps
+				if (b > 0) {
+					Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
+					Complex downInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - binTimeFactor);
+					Complex shortVerticalTwist = _impl::mul<true>(prediction.input, downInput);
+
+					auto &downBin = bins[b - 1];
+					phase += _impl::mul(downBin.output, shortVerticalTwist);
+					
+					if (b >= longVerticalStep) {
+						Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*binTimeFactor);
+						Complex longVerticalTwist = _impl::mul<true>(prediction.input, longDownInput);
+
+						auto &longDownBin = bins[b - longVerticalStep];
+						phase += _impl::mul(longDownBin.output, longVerticalTwist);
+					}
+				}
+				// Downwards vertical steps
+				if (b < bands - 1) {
+					auto &upPrediction = predictions[b + 1];
+					auto &upMapPoint = outputMap[b + 1];
+
+					Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
+					Complex downInput = getFractional<&Band::input>(maxChannel, upMapPoint.inputBin - binTimeFactor);
+					Complex shortVerticalTwist = _impl::mul<true>(upPrediction.input, downInput);
+
+					auto &upBin = bins[b + 1];
+					phase += _impl::mul<true>(upBin.output, shortVerticalTwist);
+					
+					if (b < bands - longVerticalStep) {
+						auto &longUpPrediction = predictions[b + longVerticalStep];
+						auto &longUpMapPoint = outputMap[b + longVerticalStep];
+
+						Complex longDownInput = getFractional<&Band::input>(maxChannel, longUpMapPoint.inputBin - longVerticalStep*binTimeFactor);
+						Complex longVerticalTwist = _impl::mul<true>(longUpPrediction.input, longDownInput);
+
+						auto &longUpBin = bins[b + longVerticalStep];
+						phase += _impl::mul<true>(longUpBin.output, longVerticalTwist);
+					}
+				}
+
+				outputBin.output = prediction.makeOutput(phase);
+				
+				// All other bins are locked in phase
+				for (int c = 0; c < channels; ++c) {
+					if (c != maxChannel) {
+						auto &channelBin = bandsForChannel(c)[b];
+						auto &channelPrediction = predictionsForChannel(c)[b];
+						
+						Complex channelTwist = _impl::mul<true>(channelPrediction.input, prediction.input);
+						Complex channelPhase = _impl::mul(outputBin.output, channelTwist);
+						channelBin.output = channelPrediction.makeOutput(channelPhase);
+					}
+				}
+			}
+			return;
+		}
+		step -= splitMainPrediction;
+
+		if (blockProcess.newSpectrum) {
+			for (auto &bin : channelBands) {
+				bin.prevInput = bin.input;
+			}
+		}
 	}
 	
 	// Produces smoothed energy across all channels
-	void smoothEnergy(Sample smoothingBins) {
+	static constexpr size_t smoothEnergySteps = 3;
+	Sample smoothEnergyState = 0;
+	void smoothEnergy(size_t step, Sample smoothingBins) {
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
-		for (auto &e : energy) e = 0;
-		for (int c = 0; c < channels; ++c) {
-			Band *bins = bandsForChannel(c);
-			for (int b = 0; b < bands; ++b) {
-				Sample e = std::norm(bins[b].input);
-				bins[b].inputEnergy = e; // Used for interpolating prediction energy
-				energy[b] += e;
+		if (step-- == 0) {
+			for (auto &e : energy) e = 0;
+			for (int c = 0; c < channels; ++c) {
+				Band *bins = bandsForChannel(c);
+				for (int b = 0; b < bands; ++b) {
+					Sample e = std::norm(bins[b].input);
+					bins[b].inputEnergy = e; // Used for interpolating prediction energy
+					energy[b] += e;
+				}
 			}
+			for (int b = 0; b < bands; ++b) {
+				smoothedEnergy[b] = energy[b];
+			}
+			smoothEnergyState = 0;
+			return;
+		}
+
+		// The two other steps are repeated smoothing passes, down and up
+		Sample e = smoothEnergyState;
+		for (int b = bands - 1; b >= 0; --b) {
+			e += (smoothedEnergy[b] - e)*smoothingSlew;
+			smoothedEnergy[b] = e;
 		}
 		for (int b = 0; b < bands; ++b) {
-			smoothedEnergy[b] = energy[b];
+			e += (smoothedEnergy[b] - e)*smoothingSlew;
+			smoothedEnergy[b] = e;
 		}
-		Sample e = 0;
-		for (int repeat = 0; repeat < 2; ++repeat) {
-			for (int b = bands - 1; b >= 0; --b) {
-				e += (smoothedEnergy[b] - e)*smoothingSlew;
-				smoothedEnergy[b] = e;
-			}
-			for (int b = 0; b < bands; ++b) {
-				e += (smoothedEnergy[b] - e)*smoothingSlew;
-				smoothedEnergy[b] = e;
-			}
-		}
+		smoothEnergyState = e;
 	}
 	
 	Sample mapFreq(Sample freq) const {
@@ -678,9 +721,7 @@ private:
 	}
 	
 	// Identifies spectral peaks using energy across all channels
-	void findPeaks(Sample smoothingBins) {
-		smoothEnergy(smoothingBins);
-
+	void findPeaks() {
 		peaks.resize(0);
 		
 		int start = 0;

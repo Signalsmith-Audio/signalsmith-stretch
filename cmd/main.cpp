@@ -2,6 +2,16 @@
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
 
+size_t activeStepIndex = 0;
+void profileProcessStart(int, int);
+void profileProcessEndStep();
+void profileProcessStep(size_t, size_t);
+void profileProcessEnd();
+#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_START profileProcessStart
+#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP profileProcessStep
+#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP profileProcessEndStep
+#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_END profileProcessEnd
+
 #include "signalsmith-stretch/signalsmith-stretch.h"
 
 #include "./util/stopwatch.h"
@@ -9,8 +19,43 @@
 #include "./util/simple-args.h"
 #include "./util/wav.h"
 
+#include "plot/plot.h"
+std::vector<signalsmith::Stopwatch> processStopwatches;
+signalsmith::Stopwatch processStopwatchStart, processStopwatchEnd;
+bool started = false;
+bool activeStep = false;
+void profileProcessStart(int /*inputSamples*/, int /*outputSamples*/) {
+	activeStep = false;
+	started = true;
+	processStopwatchStart.startLap();
+}
+void profileProcessEndStep() {
+	if (activeStep) {
+		activeStep = false;
+		processStopwatches[activeStepIndex].lap();
+	} else if (started) {
+		started = false;
+		processStopwatchStart.lap();
+	}
+	processStopwatchEnd.startLap();
+}
+void profileProcessStep(size_t step, size_t count) {
+	profileProcessEndStep();
+	activeStep = true;
+	activeStepIndex = step;
+	if (processStopwatches.size() < count) {
+		processStopwatches.resize(count);
+	}
+	processStopwatches[step].startLap();
+}
+void profileProcessEnd() {
+	processStopwatchEnd.lap();
+}
+
 int main(int argc, char* argv[]) {
 	signalsmith::stretch::SignalsmithStretch<float/*, std::ranlux48_base*/> stretch; // optional cheaper RNG for performance comparison
+	
+	processStopwatches.reserve(1000);
 
 	SimpleArgs args(argc, argv);
 	
@@ -56,7 +101,7 @@ int main(int argc, char* argv[]) {
 	stopwatch.start();
 	stretch.presetDefault(inWav.channels, inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
-	double initSeconds = stopwatch.seconds(stopwatch.lap());
+	double initSeconds = stopwatch.lap();
 
 	initMemory = initMemory.diff();
 	std::cout << "Setup:\n\t" << initSeconds << "s\n";
@@ -85,7 +130,7 @@ int main(int argc, char* argv[]) {
 	stretch.flush(outWav, tailSamples);
 	outWav.offset -= outputLength;
 
-	double processSeconds = stopwatch.seconds(stopwatch.lap());
+	double processSeconds = stopwatch.lap();
 	double processRate = (inWav.length()/inWav.sampleRate)/processSeconds;
 	double processPercent = 100/processRate;
 	processMemory = processMemory.diff();
@@ -108,6 +153,31 @@ int main(int argc, char* argv[]) {
 
 		// the `.flush()` call already handled foldback stuff at the end (since we asked for a shorter `tailSamples`)
 	}
+
+	signalsmith::plot::Plot2D plot(400, 150);
+	plot.x.major(0, "").label("step");
+	plot.y.major(0).label("time spent");
+	auto &line = plot.line().fillToY(0);
+	auto &extraLine = plot.line().fillToY(0);
+	for (size_t i = 0; i < processStopwatches.size(); ++i) {
+		double time = processStopwatches[i].total();
+		if (i%5 == 0) {
+			plot.x.tick(i + 0.5, std::to_string(i));
+		} else {
+			plot.x.tick(i + 0.5, "");
+		}
+		line.add(i, time);
+		line.add(i + 1, time);
+	}
+	extraLine.add(-1, 0);
+	extraLine.add(-1, processStopwatchStart.total());
+	extraLine.add(0, processStopwatchStart.total());
+	extraLine.add(0, 0);
+	extraLine.add(processStopwatches.size(), 0);
+	extraLine.add(processStopwatches.size(), processStopwatchEnd.total());
+	extraLine.add(processStopwatches.size() + 1, processStopwatchEnd.total());
+	extraLine.add(processStopwatches.size() + 1, 0);
+	plot.write("profile.svg");
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 	

@@ -6,37 +6,40 @@
 #include <atomic>
 #include <algorithm>
 
-// We want CPU time, not wall-clock time, so we can't use `std::chrono::high_resolution_clock`
-#ifdef WINDOWS
+#ifdef WINDOWS // completely untested!
 #	include <windows.h>
 namespace signalsmith {
 class Stopwatch {
 	using Time = __int64;
+	using Duration = Time;
 	inline Time now() {
 		LARGE_INTEGER result;
 		QueryPerformanceCounter(&result);
 		return result.QuadPart;
 	}
-	static double timeToSeconds(double t) {
+	static double toSeconds(Duration t) {
 		LARGE_INTEGER freq;
 		QueryPerformanceFrequency(&freq);
 		return t/double(freq);
 	}
 #else
-#	include <ctime>
+#	include <chrono>
 namespace signalsmith {
 class Stopwatch {
-	using Time = std::clock_t;
+	using Clock = std::conditional<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>::type;
+	using Time = Clock::time_point;
+	using Duration = std::chrono::duration<double>;
+	
 	inline Time now() {
-		return std::clock();
+		return Clock::now();
 	}
-	static double timeToSeconds(double t) {
-		return t/double(CLOCKS_PER_SEC);
+	static double toSeconds(Duration duration) {
+		return duration.count();
 	}
 #endif
 
 	std::atomic<Time> lapStart; // the atomic store/load should act as barriers for reordering operations
-	Time lapBest, lapTotal, lapTotal2;
+	double lapBest, lapTotal, lapTotal2;
 	double lapOverhead = 0;
 	int lapCount = 0;
 	
@@ -53,23 +56,22 @@ public:
 		}
 		start();
 	}
-
-	static double seconds(double time) {
-		return timeToSeconds(time);
+	// Explicit because std::atomic<> can't be copied/moved
+	Stopwatch(const Stopwatch &other) : lapBest(other.lapBest), lapTotal(other.lapTotal), lapTotal2(other.lapTotal2), lapOverhead(other.lapOverhead), lapCount(other.lapCount) {
+		lapStart.store(other.lapStart.load());
 	}
 
 	void start() {
 		lapCount = 0;
 		lapTotal = lapTotal2 = 0;
-		lapBest = std::numeric_limits<Time>::max();
+		lapBest = std::numeric_limits<double>::max();
 		startLap();
 	}
 	void startLap() {
 		lapStart.store(now());
 	}
 	double lap() {
-		auto start = lapStart.load();
-		auto diff = now() - start;
+		double diff = toSeconds(now() - lapStart.load());
 
 		if (diff < lapBest) lapBest = diff;
 		lapCount++;
@@ -100,5 +102,6 @@ public:
 	}
 };
 
-} // namespace
+} //namespace
+
 #endif // include guard
