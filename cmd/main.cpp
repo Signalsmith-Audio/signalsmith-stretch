@@ -154,11 +154,22 @@ int main(int argc, char* argv[]) {
 		// the `.flush()` call already handled foldback stuff at the end (since we asked for a shorter `tailSamples`)
 	}
 
-	signalsmith::plot::Plot2D plot(400, 150);
-	plot.x.major(0, "").label("step");
-	plot.y.major(0).label("time spent");
+	signalsmith::plot::Figure figure;
+	auto &plot = figure(0, 0).plot(400, 150);
+	plot.x.blank().label("step");
+	plot.y.major(0, "");
+	plot.title("computation time");
+	auto &cumulativePlot = figure(1, 0).plot(150, 150);
+	cumulativePlot.x.major(processStopwatches.size(), "");
+	cumulativePlot.y.major(0, "");
+	cumulativePlot.title("cumulative");
 	auto &line = plot.line().fillToY(0);
 	auto &extraLine = plot.line().fillToY(0);
+	auto &cumulativeLine = cumulativePlot.line();
+	auto &flatLine = cumulativePlot.line();
+	double cumulativeTime = 0;
+	line.add(0, 0);
+	cumulativeLine.add(0, 0);
 	for (size_t i = 0; i < processStopwatches.size(); ++i) {
 		double time = processStopwatches[i].total();
 		if (i%5 == 0) {
@@ -168,16 +179,23 @@ int main(int argc, char* argv[]) {
 		}
 		line.add(i, time);
 		line.add(i + 1, time);
+
+		cumulativeTime += time;
+		cumulativeLine.add(i, cumulativeTime);
+		cumulativeLine.add(i + 1, cumulativeTime);
 	}
-	extraLine.add(-1, 0);
-	extraLine.add(-1, processStopwatchStart.total());
-	extraLine.add(0, processStopwatchStart.total());
+	line.add(processStopwatches.size(), 0);
 	extraLine.add(0, 0);
-	extraLine.add(processStopwatches.size(), 0);
+	extraLine.add(0, processStopwatchStart.total());
+	extraLine.add(1, processStopwatchStart.total());
+	extraLine.add(1, 0);
+	extraLine.add(processStopwatches.size() - 1, 0);
+	extraLine.add(processStopwatches.size() - 1, processStopwatchEnd.total());
 	extraLine.add(processStopwatches.size(), processStopwatchEnd.total());
-	extraLine.add(processStopwatches.size() + 1, processStopwatchEnd.total());
-	extraLine.add(processStopwatches.size() + 1, 0);
-	plot.write("profile.svg");
+	extraLine.add(processStopwatches.size(), 0);
+	flatLine.add(0, 0);
+	flatLine.add(processStopwatches.size(), cumulativeTime);
+	figure.write("profile.svg");
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 	

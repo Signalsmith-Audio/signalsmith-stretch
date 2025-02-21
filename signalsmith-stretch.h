@@ -287,8 +287,6 @@ struct SignalsmithStretch {
 					stft.synthesiseStep(step);
 					continue;
 				}
-				// This should never happen - something has gone terribly wrong
-				abort();
 			}
 			if (processRatio >= 1) { // we *should* have just written a block, and are now ready to start a new one
 				blockProcess.step = 0;
@@ -323,6 +321,7 @@ struct SignalsmithStretch {
 				blockProcess.steps += processSpectrumSteps;
 
 				blockProcess.steps += stft.synthesiseSteps() + 1;
+				blockProcess.steps += 1; // planning the next block
 			}
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
 			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
@@ -670,8 +669,10 @@ private:
 		step -= splitMainPrediction;
 
 		if (blockProcess.newSpectrum) {
-			for (auto &bin : channelBands) {
-				bin.prevInput = bin.input;
+			if (step-- == 0) {
+				for (auto &bin : channelBands) {
+					bin.prevInput = bin.input;
+				}
 			}
 		}
 	}
