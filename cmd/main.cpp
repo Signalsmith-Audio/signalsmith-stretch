@@ -77,6 +77,7 @@ int main(int argc, char* argv[]) {
 	double tonality = args.flag<double>("tonality", "tonality limit (Hz)", 8000);
 	double time = args.flag<double>("time", "time-stretch factor", 1);
 	bool exactLength = args.hasFlag("exact", "trims the start/end so the output has the correct length");
+	bool splitComputation = args.hasFlag("split-computation", "distributes the computation more evenly (but higher latency)");
 	args.errorExit();
 	
 	std::cout << Console::Bright << inputWav << Console::Reset;
@@ -105,7 +106,7 @@ int main(int argc, char* argv[]) {
 	signalsmith::Stopwatch stopwatch;
 
 	stopwatch.start();
-	stretch.presetDefault(int(inWav.channels), inWav.sampleRate);
+	stretch.presetDefault(int(inWav.channels), inWav.sampleRate, splitComputation);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	double initSeconds = stopwatch.lap();
 

@@ -50,7 +50,7 @@ struct SignalsmithStretch {
 		return int(stft.analysisLatency());
 	}
 	int outputLatency() const {
-		return int(stft.synthesisLatency() + stft.defaultInterval());
+		return int(stft.synthesisLatency() + _splitComputation*stft.defaultInterval());
 	}
 	
 	void reset() {
@@ -67,15 +67,16 @@ struct SignalsmithStretch {
 	}
 
 	// Configures using a default preset
-	void presetDefault(int nChannels, Sample sampleRate) {
-		configure(nChannels, sampleRate*0.12, sampleRate*0.03);
+	void presetDefault(int nChannels, Sample sampleRate, bool splitComputation=false) {
+		configure(nChannels, sampleRate*0.12, sampleRate*0.03, splitComputation);
 	}
-	void presetCheaper(int nChannels, Sample sampleRate) {
-		configure(nChannels, sampleRate*0.1, sampleRate*0.04);
+	void presetCheaper(int nChannels, Sample sampleRate, bool splitComputation=true) {
+		configure(nChannels, sampleRate*0.1, sampleRate*0.04, splitComputation);
 	}
 
 	// Manual setup
-	void configure(int nChannels, int blockSamples, int intervalSamples) {
+	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false) {
+		_splitComputation = splitComputation;
 		channels = nChannels;
 		stft.configure(channels, channels, blockSamples, intervalSamples + 1);
 		stft.setInterval(intervalSamples, stft.kaiser);
@@ -216,11 +217,10 @@ struct SignalsmithStretch {
 		}
 		
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
-			Sample processRatio = Sample(blockProcess.samplesSinceLast)/stft.defaultInterval();
-			if (processRatio >= 1) { // we're ready to start a new block
-				processRatio = 0;
+			bool newBlock = blockProcess.samplesSinceLast >= stft.defaultInterval();
+			if (newBlock) {
 				blockProcess.step = 0;
-				blockProcess.steps = 0; // how many steps
+				blockProcess.steps = 0; // how many processing steps this block will have
 				blockProcess.samplesSinceLast = 0;
 				
 				// Time to process a spectrum!  Where should it come from in the input?
@@ -230,8 +230,10 @@ struct SignalsmithStretch {
 				
 				copyInput(inputOffset);
 				stashedInput = stft.input; // save the input state, since that's what we'll analyse later
-				stashedOutput = stft.output; // save the current output, and read from it
-				stft.moveOutput(stft.defaultInterval()); // the actual input jumps forward in time by one interval, ready for the synthesis
+				if (_splitComputation) {
+					stashedOutput = stft.output; // save the current output, and read from it
+					stft.moveOutput(stft.defaultInterval()); // the actual input jumps forward in time by one interval, ready for the synthesis
+				}
 
 				blockProcess.newSpectrum = didSeek || (inputInterval > 0);
 				blockProcess.mappedFrequencies = customFreqMap || freqMultiplier != 1;
@@ -252,7 +254,12 @@ struct SignalsmithStretch {
 
 				blockProcess.steps += stft.synthesiseSteps() + 1;
 			}
-			size_t processToStep = std::min<size_t>(blockProcess.steps, (blockProcess.steps + 1)*processRatio);
+			
+			size_t processToStep = newBlock ? blockProcess.steps : 0;
+			if (_splitComputation) {
+				Sample processRatio = Sample(blockProcess.samplesSinceLast + 1)/stft.defaultInterval();
+				processToStep = std::min<size_t>(blockProcess.steps, (blockProcess.steps + 0.999f)*processRatio);
+			}
 			
 			while (blockProcess.step < processToStep) {
 				size_t step = blockProcess.step++;
@@ -334,7 +341,7 @@ struct SignalsmithStretch {
 #endif
 
 			++blockProcess.samplesSinceLast;
-			stashedOutput.swap(stft.output);
+			if (_splitComputation) stashedOutput.swap(stft.output);
 			for (int c = 0; c < channels; ++c) {
 				auto &&outputChannel = outputs[c];
 				Sample v = 0;
@@ -342,7 +349,7 @@ struct SignalsmithStretch {
 				outputChannel[outputIndex] = v;
 			}
 			stft.moveOutput(1);
-			stashedOutput.swap(stft.output);
+			if (_splitComputation) stashedOutput.swap(stft.output);
 		}
 		
 		copyInput(inputSamples);
@@ -383,6 +390,7 @@ struct SignalsmithStretch {
 		}
 	}
 private:
+	bool _splitComputation = false;
 	struct {
 		size_t samplesSinceLast = -1;
 		size_t steps = 0;
