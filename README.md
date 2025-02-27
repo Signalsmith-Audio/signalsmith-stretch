@@ -118,17 +118,15 @@ Using `.seek()`/`.flush()` like this, you can perform an exact time-stretch on a
 
 ## Compiling
 
-⚠️ This has mostly been tested with Clang.  If you're using another compiler and have any problems, please get in touch.
+⚠️ This has mostly been tested with AppleClang (Mac), and MSVC (Windows).  We aim to support other compilers though, so please get in touch if you have any problems.
 
-🚨 It's generally be OK to enable `-ffast-math`, however there's a bug in Apple Clang 16.0.0 which can generate incorrect SIMD code.  If you _have_ to use this version, we advise you don't use `-ffast-math`.
+Enabling `-ffast-math` (or equivalent) is fine, unless you're using Apple Clang 16.0.0 (in which case it will deliberately break, because that version generates incorrect SIMD code).
 
-It's much slower (about 10x) if optimisation is disabled altogether, so you might want to enable optimisation where it's used, even in Debug builds.
+The algorithm has a lot of number-crunching, so Debug builds are much slower (up to 10x).  If possible, you might want to enable optimisation where Stretch is used, even in Debug builds.
 
-### DSP Library
+### Dependencies and `#define`s
 
-This uses the Signalsmith DSP library for FFTs and other bits and bobs.
-
-For convenience, a copy of the library is included (with its own `LICENSE.txt`) in `dsp/`, but if you're already using this elsewhere then you should remove this copy to avoid versioning issues.
+This uses the [Signalsmith Linear](https://github.com/Signalsmith-Audio/linear) library for FFTs and other speedups.  There are [flags]([Linear repo](https://github.com/Signalsmith-Audio/linear?tab=readme-ov-file#building)) to enable Accelerate (`SIGNALSMITH_USE_ACCELERATE`) or IPP (`SIGNALSMITH_USE_IPP`).
 
 ## License
 
@@ -136,7 +134,7 @@ Released under the [MIT License](LICENSE.txt) - get in touch if you need anythin
 
 ## Other environments / languages
 
-There's a Web Audio release in [`web/`](web/) (WASM/AudioWorklet), also available on [NPM](npmjs.com/package/signalsmith-stretch).
+There's a Web Audio release in [`web/`](web/) (WASM/AudioWorklet), also available on [NPM](npmjs.com/package/signalsmith-stretch).  This has its own (higher-level) API, but the stretching algorithm will remain in-sync with the C++ library.
 
 There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch).  This is used as the default pitch/time method in [Audiomentations](https://iver56.github.io/audiomentations/).
 
