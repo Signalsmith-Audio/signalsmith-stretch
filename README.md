@@ -90,6 +90,12 @@ int outputLatency = stretch.outputLatency();
 
 You should be supplying input samples slightly ahead of the processing time (which is where changes to pitch-shift or stretch rate will be centred), and you'll receive output samples slightly behind that processing time.
 
+### Split computation
+
+All of the `.preset???()` and `.configure()` methods have an optional `splitComputation` flag.  When enabled, this introduces one extra interval of output latency, and uses this to spread the computation out more evenly.
+
+Without this (as is common for spectral processing) the library will occasionally do a bunch of computation all at once, to compute the next spectral block of audio.  This is often fine, when audio's being processed across multiple threads with a decent amount of buffering (like mixing in a DAW), but if you're in a stricter situation then this flag might help. 
+
 #### Automation
 
 To follow pitch/time automation accurately, you should give it automation values from the current processing time (`.outputLatency()` samples ahead of the output), and feed it input from `.inputLatency()` samples ahead of the current processing time.
@@ -114,7 +120,7 @@ You can then read the final part of the output using `.flush()`.  It's recommend
 stretch.flush(outputBuffers, outputSamples);
 ``` 
 
-Using `.seek()`/`.flush()` like this, you can perform an exact time-stretch on a fixed-length sound, and your result will have `.outputLatency()` of pre-roll. 
+Using `.seek()`/`.flush()` like this, you can perform an exact time-stretch on a fixed-length sound, and your result will have `.outputLatency()` of pre-roll.
 
 ## Compiling
 
