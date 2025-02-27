@@ -146,6 +146,7 @@ There's a [Rust wrapper](https://crates.io/crates/signalsmith-stretch) by [Colin
 
 We'd like to particularly thank the following people who sponsored specific features or improvements:
 
+* **Future Audio Workshop**: chunked-computation mode
 * **Metronaut**: web audio (JS/WASM) release
 * **Daniel L Bowling** and the Stanford School of Medicine: web audio improvements
 
