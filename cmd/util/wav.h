@@ -66,39 +66,40 @@ public:
 		}
 	};
 	
-	unsigned int sampleRate = 48000;
-	unsigned int channels = 1, offset = 0;
+	size_t sampleRate = 48000;
+	size_t channels = 1, offset = 0;
 	std::vector<double> samples;
-	int length() const {
-		return samples.size()/channels - offset;
+	size_t length() const {
+		size_t perChannel = samples.size()/channels;
+		return (perChannel >= offset) ? perChannel - offset : 0;
 	}
-	void resize(int length) {
+	void resize(size_t length) {
 		samples.resize((offset + length)*channels, 0);
 	}
 	template<bool isConst>
 	class ChannelReader {
 		using CSample = typename std::conditional<isConst, const double, double>::type;
 		CSample *data;
-		int stride;
+		size_t stride;
 	public:
-		ChannelReader(CSample *samples, int channels) : data(samples), stride(channels) {}
+		ChannelReader(CSample *samples, size_t channels) : data(samples), stride(channels) {}
 		
-		CSample & operator [](int i) {
+		CSample & operator [](size_t i) {
 			return data[i*stride];
 		}
 	};
-	ChannelReader<false> operator [](int c) {
+	ChannelReader<false> operator [](size_t c) {
 		return ChannelReader<false>(samples.data() + offset*channels + c, channels);
 	}
-	ChannelReader<true> operator [](int c) const {
+	ChannelReader<true> operator [](size_t c) const {
 		return ChannelReader<true>(samples.data() + offset*channels + c, channels);
 	}
 	
 	Result result = Result(Result::Code::OK);
 
 	Wav() {}
-	Wav(double sampleRate, int channels) : sampleRate(sampleRate), channels(channels) {}
-	Wav(double sampleRate, int channels, const std::vector<double> &samples) : sampleRate(sampleRate), channels(channels), samples(samples) {}
+	Wav(double sampleRate, size_t channels) : sampleRate(sampleRate), channels(channels) {}
+	Wav(double sampleRate, size_t channels, const std::vector<double> &samples) : sampleRate(sampleRate), channels(channels), samples(samples) {}
 	Wav(std::string filename) {
 		result = read(filename).warn();
 	}
@@ -141,9 +142,9 @@ public:
 				sampleRate = read32(file);
 				if (sampleRate < 1) return result = Result(Result::Code::FORMAT_ERROR, "Cannot have zero sampleRate");
 
-				unsigned int expectedBytesPerSecond = read32(file);
-				unsigned int bytesPerFrame = read16(file);
-				unsigned int bitsPerSample = read16(file);
+				size_t expectedBytesPerSecond = read32(file);
+				size_t bytesPerFrame = read16(file);
+				size_t bitsPerSample = read16(file);
 				if (!formatIsValid(formatInt, bitsPerSample)) return result = Result(Result::Code::UNSUPPORTED, "Unsupported format:bits: " + std::to_string(formatInt) + ":" + std::to_string(bitsPerSample));
 				// Since it's plain WAVE, we can do some extra checks for consistency
 				if (bitsPerSample*channels != bytesPerFrame*8) return result = Result(Result::Code::FORMAT_ERROR, "Format sizes don't add up");
@@ -191,7 +192,7 @@ public:
 		file.open(filename, std::ios::binary);
 		if (!file.is_open()) return result = Result(Result::Code::IO_ERROR, "Failed to open file: " + filename);
 		
-		int bytesPerSample;
+		size_t bytesPerSample;
 		switch (format) {
 		case Format::PCM:
 			bytesPerSample = 2;
@@ -199,30 +200,30 @@ public:
 		}
 		
 		// File size - 44 bytes is RIFF header, "fmt" block, and "data" block header
-		unsigned int dataLength = (samples.size() - offset*channels)*bytesPerSample;
-		unsigned int fileLength = 44 + dataLength;
+		size_t dataLength = (samples.size() - offset*channels)*bytesPerSample;
+		size_t fileLength = 44 + dataLength;
 
 		// RIFF chunk
 		write32(file, value_RIFF);
-		write32(file, fileLength - 8); // File length, excluding the RIFF header
+		write32(file, uint32_t(fileLength - 8)); // File length, excluding the RIFF header
 		write32(file, value_WAVE);
 		// "fmt " block
 		write32(file, value_fmt);
 		write32(file, 16); // block length
-		write16(file, (uint16_t)format);
-		write16(file, channels);
-		write32(file, sampleRate);
-		unsigned int expectedBytesPerSecond = sampleRate*channels*bytesPerSample;
-		write32(file, expectedBytesPerSecond);
-		write16(file, channels*bytesPerSample); // Bytes per frame
-		write16(file, bytesPerSample*8); // bist per sample
+		write16(file, uint16_t(format));
+		write16(file, uint16_t(channels));
+		write32(file, uint32_t(sampleRate));
+		size_t expectedBytesPerSecond = sampleRate*channels*bytesPerSample;
+		write32(file, uint32_t(expectedBytesPerSecond));
+		write16(file, uint16_t(channels*bytesPerSample)); // Bytes per frame
+		write16(file, uint16_t(bytesPerSample*8)); // bist per sample
 		
 		// "data" block
 		write32(file, value_data);
-		write32(file, dataLength);
+		write32(file, uint32_t(dataLength));
 		switch (format) {
 		case Format::PCM:
-			for (unsigned int i = offset*channels; i < samples.size(); i++) {
+			for (size_t i = offset*channels; i < samples.size(); i++) {
 				double value = samples[i]*32768;
 				if (value > 32767) value = 32767;
 				if (value <= -32768) value = -32768;

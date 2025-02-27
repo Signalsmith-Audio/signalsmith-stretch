@@ -41,16 +41,16 @@ struct SignalsmithStretch {
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
 
 	int blockSamples() const {
-		return stft.blockSamples();
+		return int(stft.blockSamples());
 	}
 	int intervalSamples() const {
-		return stft.defaultInterval();
+		return int(stft.defaultInterval());
 	}
 	int inputLatency() const {
-		return stft.blockSamples() - stft.analysisOffset();
+		return int(stft.analysisLatency());
 	}
 	int outputLatency() const {
-		return stft.synthesisOffset() + stft.defaultInterval();
+		return int(stft.synthesisLatency() + stft.defaultInterval());
 	}
 	
 	void reset() {
@@ -84,7 +84,7 @@ struct SignalsmithStretch {
 		stashedOutput = stft.output;
 		tmpBuffer.resize(blockSamples + intervalSamples);
 
-		bands = stft.bands();
+		bands = int(stft.bands());
 		channelBands.assign(bands*channels, Band());
 		
 		peaks.reserve(bands/2);
@@ -122,7 +122,7 @@ struct SignalsmithStretch {
 		tmpBuffer.resize(stft.blockSamples() + stft.defaultInterval());
 
 		int startIndex = std::max<int>(0, inputSamples - int(tmpBuffer.size())); // start position in input
-		int padStart = tmpBuffer.size() - (inputSamples - startIndex); // start position in tmpBuffer
+		int padStart = int(tmpBuffer.size() + startIndex) - inputSamples; // start position in tmpBuffer
 
 		Sample totalEnergy = 0;
 		for (int c = 0; c < channels; ++c) {
@@ -152,7 +152,7 @@ struct SignalsmithStretch {
 		int prevCopiedInput = 0;
 		auto copyInput = [&](int toIndex){
 
-			int length = std::min<int>(stft.blockSamples() + stft.defaultInterval(), toIndex - prevCopiedInput);
+			int length = std::min<int>(int(stft.blockSamples() + stft.defaultInterval()), toIndex - prevCopiedInput);
 			tmpBuffer.resize(length);
 			int offset = toIndex - length;
 			for (int c = 0; c < channels; ++c) {
@@ -217,13 +217,48 @@ struct SignalsmithStretch {
 		
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
 			Sample processRatio = Sample(blockProcess.samplesSinceLast)/stft.defaultInterval();
-			size_t processToStep = std::min<size_t>(blockProcess.steps, blockProcess.steps*processRatio);
+			if (processRatio >= 1) { // we're ready to start a new block
+				processRatio = 0;
+				blockProcess.step = 0;
+				blockProcess.steps = 0; // how many steps
+				blockProcess.samplesSinceLast = 0;
+				
+				// Time to process a spectrum!  Where should it come from in the input?
+				int inputOffset = std::round(outputIndex*Sample(inputSamples)/outputSamples);
+				int inputInterval = inputOffset - prevInputOffset;
+				prevInputOffset = inputOffset;
+				
+				copyInput(inputOffset);
+				stashedInput = stft.input; // save the input state, since that's what we'll analyse later
+				stashedOutput = stft.output; // save the current output, and read from it
+				stft.moveOutput(stft.defaultInterval()); // the actual input jumps forward in time by one interval, ready for the synthesis
+
+				blockProcess.newSpectrum = didSeek || (inputInterval > 0);
+				blockProcess.mappedFrequencies = customFreqMap || freqMultiplier != 1;
+				if (blockProcess.newSpectrum) {
+					// make sure the previous input is the correct distance in the past (give or take 1 sample)
+					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
+					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
+
+					// analyse a new input
+					blockProcess.steps += stft.analyseSteps() + 1;
+				}
+
+				blockProcess.timeFactor = didSeek ? seekTimeFactor : stft.defaultInterval()/std::max<Sample>(1, inputInterval);
+				didSeek = false;
+
+				updateProcessSpectrumSteps();
+				blockProcess.steps += processSpectrumSteps;
+
+				blockProcess.steps += stft.synthesiseSteps() + 1;
+			}
+			size_t processToStep = std::min<size_t>(blockProcess.steps, (blockProcess.steps + 1)*processRatio);
+			
 			while (blockProcess.step < processToStep) {
 				size_t step = blockProcess.step++;
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP
 				SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP(step, blockProcess.steps);
 #endif
-				
 				if (blockProcess.newSpectrum) {
 					if (blockProcess.reanalysePrev) {
 						// analyse past input
@@ -294,41 +329,6 @@ struct SignalsmithStretch {
 					continue;
 				}
 			}
-			if (processRatio >= 1) { // we *should* have just written a block, and are now ready to start a new one
-				blockProcess.step = 0;
-				blockProcess.steps = 0; // how many steps
-				blockProcess.samplesSinceLast = 0;
-				
-				// Time to process a spectrum!  Where should it come from in the input?
-				int inputOffset = std::round(outputIndex*Sample(inputSamples)/outputSamples);
-				int inputInterval = inputOffset - prevInputOffset;
-				prevInputOffset = inputOffset;
-				
-				copyInput(inputOffset);
-				stashedInput = stft.input; // save the input state, since that's what we'll analyse later
-				stashedOutput = stft.output; // save the current output, and read from it
-				stft.moveOutput(stft.defaultInterval()); // the actual input jumps forward in time by one interval, ready for the synthesis
-
-				blockProcess.newSpectrum = didSeek || (inputInterval > 0);
-				blockProcess.mappedFrequencies = customFreqMap || freqMultiplier != 1;
-				if (blockProcess.newSpectrum) {
-					// make sure the previous input is the correct distance in the past (give or take 1 sample)
-					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
-					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
-
-					// analyse a new input
-					blockProcess.steps += stft.analyseSteps() + 1;
-				}
-
-				blockProcess.timeFactor = didSeek ? seekTimeFactor : stft.defaultInterval()/std::max<Sample>(1, inputInterval);
-				didSeek = false;
-
-				updateProcessSpectrumSteps();
-				blockProcess.steps += processSpectrumSteps;
-
-				blockProcess.steps += stft.synthesiseSteps() + 1;
-				blockProcess.steps += 1; // planning the next block
-			}
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
 			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
 #endif
@@ -355,7 +355,7 @@ struct SignalsmithStretch {
 	// Read the remaining output, providing no further input.  `outputSamples` should ideally be at least `.outputLatency()`
 	template<class Outputs>
 	void flush(Outputs &&outputs, int outputSamples) {
-		int plainOutput = std::min<int>(outputSamples, stft.blockSamples());
+		int plainOutput = std::min<int>(outputSamples, int(stft.blockSamples()));
 		int foldedBackOutput = std::min<int>(outputSamples, int(stft.blockSamples()) - plainOutput);
 		stft.finishOutput(1);
 		for (int c = 0; c < channels; ++c) {
@@ -495,7 +495,7 @@ private:
 	}
 
 	// If RandomEngine=void, use std::default_random_engine;
-	using RandomEngineImpl = std::conditional<
+	using RandomEngineImpl = typename std::conditional<
 		std::is_void<RandomEngine>::value,
 		std::default_random_engine,
 		RandomEngine
@@ -527,7 +527,7 @@ private:
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {
-				int channel = step;
+				int channel = int(step);
 				auto bins = bandsForChannel(channel);
 
 				Complex rot = std::polar(Sample(1), bandToFreq(0)*stft.defaultInterval()*Sample(2*M_PI));
@@ -572,7 +572,7 @@ private:
 			return;
 		}
 		if (step < size_t(channels)) {
-			size_t c = step;
+			int c = int(step);
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
 			for (int b = 0; b < bands; ++b) {
@@ -598,9 +598,9 @@ private:
 
 		if (step < splitMainPrediction) {
 			// Re-predict using phase differences between frequencies
-			int chunk = step;
-			int startB = bands*chunk/splitMainPrediction;
-			int endB = bands*(chunk + 1)/splitMainPrediction;
+			size_t chunk = step;
+			int startB = int(bands*chunk/splitMainPrediction);
+			int endB = int(bands*(chunk + 1)/splitMainPrediction);
 			for (int b = startB; b < endB; ++b) {
 				// Find maximum-energy channel and calculate that
 				int maxChannel = 0;

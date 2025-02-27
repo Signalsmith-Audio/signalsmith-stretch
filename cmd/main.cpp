@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
 	signalsmith::Stopwatch stopwatch;
 
 	stopwatch.start();
-	stretch.presetDefault(inWav.channels, inWav.sampleRate);
+	stretch.presetDefault(int(inWav.channels), inWav.sampleRate);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	double initSeconds = stopwatch.lap();
 
@@ -130,7 +130,7 @@ int main(int argc, char* argv[]) {
 	stretch.seek(inWav, stretch.inputLatency(), 1/time);
 	inWav.offset += stretch.inputLatency();
 	// Process it all in one call, although it works just the same if we split into smaller blocks
-	stretch.process(inWav, inputLength, outWav, outputLength);
+	stretch.process(inWav, int(inputLength), outWav, int(outputLength));
 	// Read the last bit of output without giving it any more input
 	outWav.offset += outputLength;
 	stretch.flush(outWav, tailSamples);
