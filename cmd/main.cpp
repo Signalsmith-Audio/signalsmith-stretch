@@ -2,15 +2,17 @@
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
 
+#ifdef PROFILE_PLOT_CHUNKS
 size_t activeStepIndex = 0;
 void profileProcessStart(int, int);
 void profileProcessEndStep();
 void profileProcessStep(size_t, size_t);
 void profileProcessEnd();
-#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_START profileProcessStart
-#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP profileProcessStep
-#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP profileProcessEndStep
-#define SIGNALSMITH_STRETCH_PROFILE_PROCESS_END profileProcessEnd
+#	define SIGNALSMITH_STRETCH_PROFILE_PROCESS_START profileProcessStart
+#	define SIGNALSMITH_STRETCH_PROFILE_PROCESS_STEP profileProcessStep
+#	define SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP profileProcessEndStep
+#	define SIGNALSMITH_STRETCH_PROFILE_PROCESS_END profileProcessEnd
+#endif
 
 #include "signalsmith-stretch/signalsmith-stretch.h"
 
@@ -19,6 +21,7 @@ void profileProcessEnd();
 #include "./util/simple-args.h"
 #include "./util/wav.h"
 
+#ifdef PROFILE_PLOT_CHUNKS
 #include "plot/plot.h"
 std::vector<signalsmith::Stopwatch> processStopwatches;
 signalsmith::Stopwatch processStopwatchStart, processStopwatchEnd;
@@ -51,11 +54,14 @@ void profileProcessStep(size_t step, size_t count) {
 void profileProcessEnd() {
 	processStopwatchEnd.lap();
 }
+#endif
 
 int main(int argc, char* argv[]) {
 	signalsmith::stretch::SignalsmithStretch<float/*, std::ranlux48_base*/> stretch; // optional cheaper RNG for performance comparison
-	
+
+#ifdef PROFILE_PLOT_CHUNKS
 	processStopwatches.reserve(1000);
+#endif
 
 	SimpleArgs args(argc, argv);
 	
@@ -154,6 +160,7 @@ int main(int argc, char* argv[]) {
 		// the `.flush()` call already handled foldback stuff at the end (since we asked for a shorter `tailSamples`)
 	}
 
+#ifdef PROFILE_PLOT_CHUNKS
 	signalsmith::plot::Figure figure;
 	auto &plot = figure(0, 0).plot(400, 150);
 	plot.x.blank().label("step");
@@ -196,6 +203,7 @@ int main(int argc, char* argv[]) {
 	flatLine.add(0, 0);
 	flatLine.add(processStopwatches.size(), cumulativeTime);
 	figure.write("profile.svg");
+#endif
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 	

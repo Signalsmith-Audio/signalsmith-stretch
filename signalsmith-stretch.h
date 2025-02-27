@@ -11,11 +11,12 @@
 #include <algorithm>
 #include <functional>
 #include <random>
+#include <type_traits>
 
 namespace signalsmith { namespace stretch {
 
 namespace _impl {
-	template <bool conjugateSecond=false, typename V>
+	template<bool conjugateSecond=false, typename V>
 	static std::complex<V> mul(const std::complex<V> &a, const std::complex<V> &b) {
 		return conjugateSecond ? std::complex<V>{
 			b.real()*a.real() + b.imag()*a.imag(),
@@ -25,9 +26,14 @@ namespace _impl {
 			a.real()*b.imag() + a.imag()*b.real()
 		};
 	}
+	template<typename V>
+	static V norm(const std::complex<V> &a) {
+		V r = a.real(), i = a.imag();
+		return r*r + i*i;
+	}
 }
 
-template<typename Sample=float, class RandomEngine=std::default_random_engine>
+template<typename Sample=float, class RandomEngine=void>
 struct SignalsmithStretch {
 	static constexpr size_t version[3] = {1, 1, 1};
 
@@ -475,10 +481,10 @@ private:
 		Complex input;
 
 		Complex makeOutput(Complex phase) {
-			Sample phaseNorm = std::norm(phase);
+			Sample phaseNorm = _impl::norm(phase);
 			if (phaseNorm <= noiseFloor) {
 				phase = input; // prediction is too weak, fall back to the input
-				phaseNorm = std::norm(input) + noiseFloor;
+				phaseNorm = _impl::norm(input) + noiseFloor;
 			}
 			return phase*std::sqrt(energy/phaseNorm);
 		}
@@ -488,7 +494,13 @@ private:
 		return channelPredictions.data() + c*bands;
 	}
 
-	RandomEngine randomEngine;
+	// If RandomEngine=void, use std::default_random_engine;
+	using RandomEngineImpl = std::conditional<
+		std::is_void<RandomEngine>::value,
+		std::default_random_engine,
+		RandomEngine
+	>::type;
+	RandomEngineImpl randomEngine;
 
 	size_t processSpectrumSteps = 0;
 	static constexpr size_t splitMainPrediction = 8; // it's just heavy, since we're blending up to 4 different phase predictions
@@ -550,7 +562,7 @@ private:
 				for (int c = 0; c < channels; ++c) {
 					Band *bins = bandsForChannel(c);
 					for (int b = 0; b < bands; ++b) {
-						bins[b].inputEnergy = std::norm(bins[b].input);
+						bins[b].inputEnergy = _impl::norm(bins[b].input);
 					}
 				}
 				for (int b = 0; b < bands; ++b) {
@@ -687,7 +699,7 @@ private:
 			for (int c = 0; c < channels; ++c) {
 				Band *bins = bandsForChannel(c);
 				for (int b = 0; b < bands; ++b) {
-					Sample e = std::norm(bins[b].input);
+					Sample e = _impl::norm(bins[b].input);
 					bins[b].inputEnergy = e; // Used for interpolating prediction energy
 					energy[b] += e;
 				}
