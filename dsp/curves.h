@@ -273,7 +273,7 @@ namespace curves {
 				if (points[0].x != points[1].x || points[0].y == points[1].y) {
 					lowGrad = _segments[0].dx(first.x);
 				}
-				auto &last = points.back(), &last2 = points[points.size() - 1];
+				auto &last = points.back(), &last2 = points[points.size() - 2];
 				if (last.x != last2.x || last.y == last2.y) {
 					highGrad = _segments.back().dx(last.x);
 				}
