@@ -27,9 +27,11 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			
 			let remoteMethods = {
 				configure: config => {
-					let blockChanged = (config.blockMs != this.config.blockMs || config.intervalMs != this.config.intervalMs);
 					Object.assign(this.config, config);
-					if (config.blockMs && blockChanged) this.configure();
+					this.configure();
+				},
+				latency: _ => {
+					return this.inputLatencySeconds + this.outputLatencySeconds;
 				},
 				setUpdateInterval: seconds => {
 					this.timeIntervalSamples = sampleRate*seconds;
@@ -182,8 +184,11 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			if (this.config.blockMs) {
 				let blockSamples = Math.round(this.config.blockMs/1000*sampleRate);
 				let intervalSamples = Math.round((this.config.intervalMs || this.config.blockMs*0.25)/1000*sampleRate);
-				this.wasmModule._configure(this.channels, blockSamples, intervalSamples);
+				let splitComputation = this.config.splitComputation;
+				this.wasmModule._configure(this.channels, blockSamples, intervalSamples, splitComputation);
 				this.wasmModule._reset();
+			} else if (this.config.preset == 'cheaper') {
+				this.wasmModule._presetCheaper(this.channels, sampleRate);
 			} else {
 				this.wasmModule._presetDefault(this.channels, sampleRate);
 			}

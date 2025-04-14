@@ -46,8 +46,8 @@ extern "C" {
 	void EMSCRIPTEN_KEEPALIVE presetCheaper(int nChannels, Sample sampleRate) {
 		stretch.presetCheaper(nChannels, sampleRate);
 	}
-	void EMSCRIPTEN_KEEPALIVE configure(int nChannels, int blockSamples, int intervalSamples) {
-		stretch.configure(nChannels, blockSamples, intervalSamples);
+	void EMSCRIPTEN_KEEPALIVE configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation) {
+		stretch.configure(nChannels, blockSamples, intervalSamples, splitComputation);
 	}
 	void EMSCRIPTEN_KEEPALIVE setTransposeFactor(Sample multiplier, Sample tonalityLimit) {
 		stretch.setTransposeFactor(multiplier, tonalityLimit);
