@@ -1,11 +1,6 @@
 #ifndef SIGNALSMITH_STRETCH_H
 #define SIGNALSMITH_STRETCH_H
 
-//#include "dsp/spectral.h"
-//#include "dsp/delay.h"
-//#include "dsp/perf.h"
-//SIGNALSMITH_DSP_VERSION_CHECK(1, 6, 0); // Check version is compatible
-
 #include "signalsmith-linear/stft.h" // https://github.com/Signalsmith-Audio/linear
 #include <vector>
 #include <algorithm>
@@ -35,7 +30,7 @@ namespace _impl {
 
 template<typename Sample=float, class RandomEngine=void>
 struct SignalsmithStretch {
-	static constexpr size_t version[3] = {1, 1, 1};
+	static constexpr size_t version[3] = {1, 2, 0};
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}

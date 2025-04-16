@@ -4,9 +4,9 @@ This is an official release of the Signalsmith Stretch library for Web Audio, us
 
 ## How to use it
 
-Call `SignalsmithStretch(audioContext, ?channelOptions)` from the main thread.  This returns a Promise which resolves to an `AudioNode`, with extra methods attached to it.
+Call `SignalsmithStretch(audioContext, ?channelOptions)` from the main thread.  This returns a Promise which resolves to an `AudioNode`, with extra methods attached to it.  The optional [`channelOptions` object](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletNode/AudioWorkletNode#options) can specify the number of inputs/outputs and channels.
 
-It can operate either on live/streaming input, or on a sample buffer you load into it.
+It can operate either on live/streaming input (if you configure it to have an input), or on a sample buffer you load into it.
 
 ### `stretch.inputTime`
 
@@ -44,3 +44,15 @@ This drops all input buffers, and resets the input buffer start time to 0.
 This drops all input buffers before the given time.  It returns (as a Promise) the an object with the current input buffer extent: `{start: ..., end: ...}`.
 
 This can be useful when processing streams or very long audio files, letting the Stretch node release old buffers once that section of the input will no longer be played back.
+
+### `stretch.latency()`
+
+Returns the latency when used in "live" mode.  This is also how far ahead you might want to schedule things (`output` in `.schedule()`) to give the node enough time to fully compensate for its own latency.
+
+### `stretch.configure({...})`
+
+Optionally reconfigure, with the following fields:
+
+* `blockMs`: block length in ms (default 120ms)
+* `intervalMs`: interval (default is 30ms)
+* `splitComputation`: spread computation more evenly across time (default `false`, but worth trying if you're getting dropouts) 
