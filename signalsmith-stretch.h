@@ -115,12 +115,13 @@ struct SignalsmithStretch {
 
 	void setFormantFactor(Sample multiplier, bool compensatePitch=false) {
 		formantMultiplier = multiplier;
+		invFormantMultiplier = 1/multiplier;
 		formantCompensation = compensatePitch;
 	}
 	void setFormantSemitones(Sample semitones, bool compensatePitch=false) {
 		setFormantFactor(std::pow(2, semitones/12), compensatePitch);
 	}
-	// 0 means attempting to detect the pitch
+	// Rough guesstimate of the fundamental frequency, used for formant analysis. 0 means attempting to detect the pitch
 	void setFormantBase(Sample baseFreq=0) {
 		formantBaseFreq = baseFreq;
 	}
@@ -425,7 +426,7 @@ private:
 	std::function<Sample(Sample)> customFreqMap = nullptr;
 	
 	bool formantCompensation = false; // compensate for pitch/freq change
-	Sample formantMultiplier = 1;
+	Sample formantMultiplier = 1, invFormantMultiplier = 1;
 
 	using STFT = signalsmith::linear::DynamicSTFT<Sample, false, true>;
 	STFT stft;
@@ -759,8 +760,7 @@ private:
 	Sample mapFreq(Sample freq) const {
 		if (customFreqMap) return customFreqMap(freq);
 		if (freq > freqTonalityLimit) {
-			Sample diff = freq - freqTonalityLimit;
-			return freqTonalityLimit*freqMultiplier + diff;
+			return freq + (freqMultiplier - 1)*freqTonalityLimit;
 		}
 		return freq*freqMultiplier;
 	}
@@ -825,13 +825,22 @@ private:
 			outputMap[b] = {b + topOffset, 1};
 		}
 	}
-	
+
+	// If we mapped formants the same way as mapFreq(), this would be the inverse
+	Sample invMapFormant(Sample freq) const {
+		if (freq*invFormantMultiplier > freqTonalityLimit) {
+			return freq + (1 - formantMultiplier)*freqTonalityLimit;
+		}
+		return freq*invFormantMultiplier;
+	}
+
 	Sample freqEstimateWeighted = 0;
 	Sample freqEstimateWeight = 0;
 	
 	std::vector<Sample> formantMetric;
 	Sample formantBaseFreq = 0;
 	void updateFormants(size_t) {
+		return;
 		for (auto &e : formantMetric) e = 0;
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
@@ -883,7 +892,7 @@ private:
 		for (int b = 0; b < bands; ++b) {
 			formantMetric[b] = std::sqrt(std::sqrt(formantMetric[b]));
 		}
-		Sample slew = 1/(freqEstimate*0.75 + 1);
+		Sample slew = 1/(freqEstimate*0.71 + 1);
 		Sample e = 0;
 		for (int repeat = 0; repeat < 1; ++repeat) {
 			for (int b = bands - 1; b >= 0; --b) {
@@ -905,12 +914,10 @@ private:
 			return low + (high - low)*fracBand;
 		};
 		
-		Sample formantMultiplierInv = 1/formantMultiplier;
-
 		for (int b = 0; b < bands; ++b) {
 			Sample inputF = bandToFreq(b);
 			Sample outputF = formantCompensation ? mapFreq(inputF) : inputF;
-			outputF *= formantMultiplierInv;
+			outputF = invMapFormant(outputF);
 
 			Sample inputE = formantMetric[b];
 			Sample targetE = getFormant(freqToBand(outputF));
