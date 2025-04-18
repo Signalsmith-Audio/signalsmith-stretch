@@ -55,6 +55,15 @@ extern "C" {
 	void EMSCRIPTEN_KEEPALIVE setTransposeSemitones(Sample semitones, Sample tonalityLimit) {
 		stretch.setTransposeSemitones(semitones, tonalityLimit);
 	}
+	void EMSCRIPTEN_KEEPALIVE setFormantFactor(Sample multiplier, bool compensate) {
+		stretch.setFormantFactor(multiplier, compensate);
+	}
+	void EMSCRIPTEN_KEEPALIVE setFormantSemitones(Sample semitones, bool compensate) {
+		stretch.setFormantSemitones(semitones, compensate);
+	}
+	void EMSCRIPTEN_KEEPALIVE setFormantBase(Sample freq) {
+		stretch.setFormantBase(freq);
+	}
 	// We can't do setFreqMap()
 	void EMSCRIPTEN_KEEPALIVE seek(int inputSamples, double playbackRate) {
 		stretch.seek(buffersIn, inputSamples, playbackRate);

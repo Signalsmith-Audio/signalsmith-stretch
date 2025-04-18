@@ -21,6 +21,9 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 				output: 0,
 				rate: 1,
 				semitones: 0,
+				formantSemitones: 0,
+				formantCompensation: false,
+				formantBaseHz: 0, /* 0 = attempt to detect */
 				loopStart: 0,
 				loopEnd: 0
 			}];
@@ -230,7 +233,9 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			let currentMapSegment = this.timeMap[0];
 
 			let wasmModule = this.wasmModule;
-			wasmModule._setTransposeSemitones(currentMapSegment.semitones, this.config.tonalityHz/sampleRate)
+			wasmModule._setTransposeSemitones(currentMapSegment.semitones, this.config.tonalityHz/sampleRate);
+			wasmModule._setFormantSemitones(currentMapSegment.formantSemitones, currentMapSegment.formantCompensation);
+			wasmModule._setFormantBase(currentMapSegment.formantBaseHz/sampleRate);
 
 			// Check the input/output channel counts
 			if (outputList[0].length != this.channels) {

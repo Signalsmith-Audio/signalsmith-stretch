@@ -2,6 +2,11 @@
 
 export SCRIPT_DIR=`dirname "$0"`
 
+if [ ! -z "$EMSDK" ]
+then
+	export EMSDK_DIR="$EMSDK"
+fi
+
 if [ -z "$EMSDK_DIR" ]
 then
 	export EMSDK_DIR="${SCRIPT_DIR}/emsdk"

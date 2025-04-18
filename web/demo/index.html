@@ -109,6 +109,12 @@
 			<label>tonality limit</label>
 			<input type="range" min="2000" max="20000" step="100" data-key="tonalityHz" class="diagram-red">
 			<input type="number" min="2000" max="20000" step="1" data-key="tonalityHz" class="diagram-red">
+			<label>formant</label>
+			<div>
+				<input type="checkbox" data-key="formantCompensation" class="diagram-yellow">
+				<input type="range" min="50" max="500" step="1" data-key="formantBaseHz" class="diagram-brown">
+			</div>
+			<input type="number" min="50" max="500" step="1" data-key="formantBaseHz" class="diagram-brown">
 			<label>block (ms)</label>
 			<input type="range" min="50" max="180" step="1" data-key="blockMs" class="diagram-green">
 			<input type="number" min="50" max="180" step="1" data-key="blockMs" class="diagram-green">
@@ -131,6 +137,9 @@
 					active: false,
 					rate: 1,
 					semitones: 0,
+					formantSemitones: 0,
+					formantCompensation: false,
+					formantBaseHz: 200,
 					loopStart: 0,
 					loopEnd: 0 // disabled (<= start), but this gets set when we load an audio file
 				};
