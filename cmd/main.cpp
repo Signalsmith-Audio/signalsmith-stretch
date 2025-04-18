@@ -2,6 +2,7 @@
 #include <iostream>
 #define LOG_EXPR(expr) std::cout << #expr << " = " << (expr) << "\n";
 
+#define PROFILE_PLOT_CHUNKS
 #ifdef PROFILE_PLOT_CHUNKS
 size_t activeStepIndex = 0;
 void profileProcessStart(int, int);
