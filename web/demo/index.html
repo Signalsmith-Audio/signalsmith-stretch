@@ -22,7 +22,7 @@
 			}
 			
 			:root {
-				font-size: calc(min(12pt, 5vh));
+				font-size: calc(min(12pt, 4.3vh));
 			}
 		
 			body {
@@ -151,7 +151,8 @@
 				let controlValues = Object.assign({}, controlValuesInitial);
 				let configValuesInitial = {
 					blockMs: 120,
-					overlap: 4
+					overlap: 4,
+					splitComputation: true
 				};
 				let configValues = Object.assign({}, configValuesInitial);
 
@@ -267,9 +268,9 @@
 							configTimeout = null;
 							if (stretch) {
 								stretch.configure({
-									tonalityHz: configValues.tonalityHz,
 									blockMs: configValues.blockMs,
-									intervalMs: configValues.blockMs/configValues.overlap
+									intervalMs: configValues.blockMs/configValues.overlap,
+									splitComputation: configValues.splitComputation,
 								});
 							}
 						}, 50);
