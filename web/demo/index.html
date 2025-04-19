@@ -156,12 +156,15 @@
 				};
 				let configValues = Object.assign({}, configValuesInitial);
 
-				// add scope, for fun
-				let scope = await Scope(audioContext);
-				scope.connect(audioContext.destination);
-				let scopeFrame = scope.openInterface();
-				scopeFrame.id = 'scope';
-				document.body.appendChild(scopeFrame);
+				let scope;
+				if (!/Mobi|Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile/.test(navigator.userAgent)) {
+					// add scope for fun, but only on desktop
+					scope = await Scope(audioContext);
+					scope.connect(audioContext.destination);
+					let scopeFrame = scope.openInterface();
+					scopeFrame.id = 'scope';
+					document.body.appendChild(scopeFrame);
+				}
 
 				// Drop zone
 				document.body.ondragover = event => {
@@ -195,7 +198,7 @@
 						stretch.disconnect();
 					}
 					stretch = await SignalsmithStretch(audioContext);
-					stretch.connect(scope);
+					stretch.connect(scope || audioContext.destination);
 					await stretch.addBuffers(channelBuffers);
 					controlValues.loopEnd = audioDuration;
 					configChanged();
