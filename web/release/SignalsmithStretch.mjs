@@ -41,6 +41,7 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 				output: 0,
 				rate: 1,
 				semitones: 0,
+				tonalityHz: 8000,
 				formantSemitones: 0,
 				formantCompensation: false,
 				formantBaseHz: 0, /* 0 = attempt to detect */
@@ -131,7 +132,7 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 				},
 				dropBuffers: toSeconds => {
 					if (typeof toSeconds !== 'number') {
-						let buffers = this.audioBuffers.flat(1).map(b => b.buffer);;
+						let buffers = this.audioBuffers.flat(1).map(b => b.buffer);
 						this.audioBuffers = [];
 						this.audioBuffersStart = this.audioBuffersEnd = 0;
 						return {
@@ -201,7 +202,7 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 		}
 		
 		config = {
-			tonalityHz: 8000
+			preset: 'default'
 		};
 		configure() {
 			if (this.config.blockMs) {
@@ -253,7 +254,7 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 			let currentMapSegment = this.timeMap[0];
 
 			let wasmModule = this.wasmModule;
-			wasmModule._setTransposeSemitones(currentMapSegment.semitones, this.config.tonalityHz/sampleRate);
+			wasmModule._setTransposeSemitones(currentMapSegment.semitones, currentMapSegment.tonalityHz/sampleRate);
 			wasmModule._setFormantSemitones(currentMapSegment.formantSemitones, currentMapSegment.formantCompensation);
 			wasmModule._setFormantBase(currentMapSegment.formantBaseHz/sampleRate);
 

@@ -55,6 +55,10 @@
 			#controls input[type=range], #controls input[type=checkbox] {
 				grid-column: 2;
 				font: inherit;
+				flex-grow: 0.25;
+			}
+			#controls input[type=range] {
+				flex-grow: 1;
 			}
 			#controls input[type=number] {
 				grid-column: 3;
@@ -110,7 +114,7 @@
 			<input type="range" min="2000" max="20000" step="100" data-key="tonalityHz" class="diagram-red">
 			<input type="number" min="2000" max="20000" step="1" data-key="tonalityHz" class="diagram-red">
 			<label>formant</label>
-			<div>
+			<div style="display: flex">
 				<input type="checkbox" data-key="formantCompensation" class="diagram-yellow">
 				<input type="range" min="50" max="500" step="1" data-key="formantBaseHz" class="diagram-brown">
 			</div>
@@ -137,6 +141,7 @@
 					active: false,
 					rate: 1,
 					semitones: 0,
+					tonalityHz: 8000,
 					formantSemitones: 0,
 					formantCompensation: false,
 					formantBaseHz: 200,
@@ -145,7 +150,6 @@
 				};
 				let controlValues = Object.assign({}, controlValuesInitial);
 				let configValuesInitial = {
-					tonalityHz: 8000,
 					blockMs: 120,
 					overlap: 4
 				};
