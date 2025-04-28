@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <functional>
 #include <random>
+#include <limits>
 #include <type_traits>
 
 namespace signalsmith { namespace stretch {
@@ -404,7 +405,7 @@ struct SignalsmithStretch {
 private:
 	bool _splitComputation = false;
 	struct {
-		size_t samplesSinceLast = -1;
+		size_t samplesSinceLast = std::numeric_limits<size_t>::max();
 		size_t steps = 0;
 		size_t step = 0;
 		
