@@ -124,9 +124,20 @@ Using `.seek()`/`.flush()` like this, you can perform an exact time-stretch on a
 
 ### Formant compensation
 
-The two methods `.setFormantFactor()` and `.setFormantSemitones()` can specify a scaling-factor for the formants.  They both have an optional `compensatePitch` flag, and enabling this . when performing formant correction/shifting.
+```cpp
+stretch.setFormantFactor(1.2); // up ~3 semitones
 
-The formant correction is not a sharp as monophonic algorithms (such such as PSOLA).  It also needs you to give it a rough estimate of fundamental frequency (relative to Nyquist) using `.setFormantBase()`.
+stretch.setTransposeSemitones(3);
+```
+
+Both of those methods both have an optional `compensatePitch` flag.  Enabling this adjust for the pitch-shift (or non-linear map) when correcting/shifting formants.
+
+The formant correction is not a sharp as monophonic algorithms (such such as PSOLA).  It also needs you to give it a rough estimate of fundamental frequency (relative to Nyquist):
+
+```cpp
+// if 200Hz is the middle-register of the instrument
+stretch.setFormantBase(200/sampleRate);
+```
 
 ## Compiling
 
