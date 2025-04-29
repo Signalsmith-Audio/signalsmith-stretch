@@ -122,6 +122,12 @@ stretch.flush(outputBuffers, outputSamples);
 
 Using `.seek()`/`.flush()` like this, you can perform an exact time-stretch on a fixed-length sound, and your result will have `.outputLatency()` of pre-roll.
 
+### Formant compensation
+
+The two methods `.setFormantFactor()` and `.setFormantSemitones()` can specify a scaling-factor for the formants.  They both have an optional `compensatePitch` flag, and enabling this . when performing formant correction/shifting.
+
+The formant correction is not a sharp as monophonic algorithms (such such as PSOLA).  It also needs you to give it a rough estimate of fundamental frequency (relative to Nyquist) using `.setFormantBase()`.
+
 ## Compiling
 
 ⚠️ This has mostly been tested with AppleClang (Mac), and MSVC (Windows).  We aim to support other compilers though, so please get in touch if you have any problems.
