@@ -157,7 +157,7 @@ Released under the [MIT License](LICENSE.txt) - get in touch if you need anythin
 
 ## Other environments / languages
 
-There's a Web Audio release in [`web/`](web/) (WASM/AudioWorklet), also available on [NPM](npmjs.com/package/signalsmith-stretch).  This has its own (higher-level) API, but the stretching algorithm will remain in-sync with the C++ library.
+There's a Web Audio release in [`web/`](web/) (WASM/AudioWorklet), also available on [NPM](https://npmjs.com/package/signalsmith-stretch).  This has its own (higher-level) API, but the stretching algorithm will remain in-sync with the C++ library.
 
 There's a [Python binding](https://pypi.org/project/python-stretch/) written/published by [Gregorio Andrea Giudici](https://github.com/gregogiudici/python-stretch).  This is used as the default pitch/time method in [Audiomentations](https://iver56.github.io/audiomentations/).
 
