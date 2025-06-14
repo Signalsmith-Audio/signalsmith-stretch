@@ -402,6 +402,69 @@ struct SignalsmithStretch {
 			}
 		}
 	}
+
+	template<class Inputs, class Outputs>
+	bool exact(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
+		if (outputSamples < outputLatency()*2) return false; // too short for this
+
+		struct ZeroPaddedInput {
+			Inputs &inputs;
+			int offset, length;
+			
+			struct Channel {
+				ZeroPaddedInput &zpi;
+				int channel;
+				
+				Sample operator[](int i) {
+					if (zpi.offset + i < zpi.length) return zpi.inputs[channel][zpi.offset + i];
+					return 0;
+				}
+			};
+			
+			Channel operator[](int c){
+				return {*this, c};
+			}
+		} zpi{inputs, inputLatency(), inputSamples};
+		seek(inputs, inputLatency(), Sample(inputSamples)/outputSamples); // start positioned on the centre of the input
+		process(zpi, inputSamples, outputs, outputSamples);
+				
+		// Fold the first bit of the input back onto itself
+		for (int c = 0; c < channels; ++c) {
+			auto &&channel = outputs[c];
+			for (int i = 0; i < std::min<int>(outputSamples - outputLatency(), outputLatency()); ++i) {
+				channel[i + outputLatency()] -= channel[outputLatency() - 1 - i];
+			}
+		}
+		// Shuffle everything along to compensate for output latency
+		for (int c = 0; c < channels; ++c) {
+			auto &&channel = outputs[c];
+			for (int i = 0; i < outputSamples - outputLatency(); ++i) {
+				channel[i] = channel[i + outputLatency()];
+			}
+		}
+
+		struct OffsetOutput {
+			Outputs &outputs;
+			int offset;
+			
+			struct Channel {
+				OffsetOutput &oo;
+				int channel;
+				
+				decltype(outputs[0][0]) operator[](int i) {
+					return oo.outputs[channel][oo.offset + i];
+				}
+			};
+			
+			Channel operator[](int c){
+				return {*this, c};
+			}
+		} oo{outputs, outputSamples - outputLatency()};
+		// Get the final chunk - extra output is already folded back as part of this
+		flush(oo, outputLatency());
+		return true;
+	}
+
 private:
 	bool _splitComputation = false;
 	struct {

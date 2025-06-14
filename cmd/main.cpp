@@ -123,26 +123,34 @@ int main(int argc, char* argv[]) {
 		std::cout << "\tallocated " << (initMemory.allocBytes/1000) << "kB, freed " << (initMemory.freeBytes/1000) << "kB\n";
 	}
 
-	// pad the input at the end, since we'll be reading slightly ahead
-	size_t paddedInputLength = inputLength + stretch.inputLatency();
-	inWav.samples.resize(paddedInputLength*inWav.channels);
-	// pad the output at the end, since we have output latency as well
-	int tailSamples = exactLength ? stretch.outputLatency() : (stretch.outputLatency() + stretch.inputLatency()); // if we don't need exact length, add a bit more output to catch any wobbles past the end
-	int paddedOutputLength = outputLength + tailSamples;
-	outWav.samples.resize(paddedOutputLength*outWav.channels);
-
 	signalsmith::MemoryTracker processMemory;
 
-	stopwatch.start();
-	// The simplest way to deal with input latency (when have access to the audio buffer) is to always be slightly ahead in the input
-	stretch.seek(inWav, stretch.inputLatency(), 1/time);
-	inWav.offset += stretch.inputLatency();
-	// Process it all in one call, although it works just the same if we split into smaller blocks
-	stretch.process(inWav, int(inputLength), outWav, int(outputLength));
-	// Read the last bit of output without giving it any more input
-	outWav.offset += outputLength;
-	stretch.flush(outWav, tailSamples);
-	outWav.offset -= outputLength;
+	if (exactLength) {
+		outWav.samples.resize(outputLength*outWav.channels);
+		stopwatch.start();
+		processMemory = {};
+		stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
+	} else {
+		// pad the input at the end, since we'll be reading slightly ahead
+		size_t paddedInputLength = inputLength + stretch.inputLatency();
+		inWav.samples.resize(paddedInputLength*inWav.channels);
+		// pad the output at the end, since we have output latency as well
+		int tailSamples = exactLength ? stretch.outputLatency() : (stretch.outputLatency() + stretch.inputLatency()); // if we don't need exact length, add a bit more output to catch any wobbles past the end
+		int paddedOutputLength = outputLength + tailSamples;
+		outWav.samples.resize(paddedOutputLength*outWav.channels);
+
+		stopwatch.start();
+		// The simplest way to deal with input latency (when have access to the audio buffer) is to always be slightly ahead in the input
+		stretch.seek(inWav, stretch.inputLatency(), 1/time);
+		inWav.offset += stretch.inputLatency();
+		// Process it all in one call, although it works just the same if we split into smaller blocks
+		processMemory = {};
+		stretch.process(inWav, int(inputLength), outWav, int(outputLength));
+		// Read the last bit of output without giving it any more input
+		outWav.offset += outputLength;
+		stretch.flush(outWav, tailSamples);
+		outWav.offset -= outputLength;
+	}
 
 	double processSeconds = stopwatch.lap();
 	double processRate = (inWav.length()/inWav.sampleRate)/processSeconds;
@@ -154,20 +162,6 @@ int main(int argc, char* argv[]) {
 		if (processMemory) args.errorExit("allocated during process()");
 	}
 	
-	if (exactLength) {
-		// The start has some extra output - we could just trim it, but we might as well fold it back into the output
-		for (size_t c = 0; c < outWav.channels; ++c) {
-			for (int i = 0; i < stretch.outputLatency(); ++i) {
-				double trimmed = outWav[stretch.outputLatency() - 1 - i][c];
-				outWav[stretch.outputLatency() + i][c] -= trimmed; // reversed in time and negated
-			}
-		}
-		// Skips the output
-		outWav.offset += stretch.outputLatency();
-
-		// the `.flush()` call already handled foldback stuff at the end (since we asked for a shorter `tailSamples`)
-	}
-
 #ifdef PROFILE_PLOT_CHUNKS
 	signalsmith::plot::Figure figure;
 	auto &plot = figure(0, 0).plot(400, 150);
