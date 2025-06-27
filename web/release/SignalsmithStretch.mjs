@@ -92,15 +92,11 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 						latestSegment = this.timeMap.pop();
 					}
 
-					let obj = {
-						active: latestSegment.active,
+					let obj = Object.assign({}, latestSegment);
+					Object.assign(obj, {
 						input: null,
 						output: outputTime,
-						rate: latestSegment.rate,
-						semitones: latestSegment.semitones,
-						loopStart: latestSegment.loopStart,
-						loopEnd: latestSegment.loopEnd
-					};
+					});
 					Object.assign(obj, objIn);
 					if (obj.input === null) {
 						let rate = (latestSegment.active ? latestSegment.rate : 0);

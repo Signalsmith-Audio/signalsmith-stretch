@@ -33,7 +33,7 @@ namespace _impl {
 
 template<typename Sample=float, class RandomEngine=void>
 struct SignalsmithStretch {
-	static constexpr size_t version[3] = {1, 3, 1};
+	static constexpr size_t version[3] = {1, 3, 2};
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
