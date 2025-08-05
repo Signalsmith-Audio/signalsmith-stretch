@@ -405,7 +405,16 @@ struct SignalsmithStretch {
 
 	template<class Inputs, class Outputs>
 	bool exact(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
-		if (outputSamples < outputLatency()*2) return false; // too short for this
+		if (outputSamples < outputLatency()*2) {
+			// to short for this - zero the output just to be polite
+			for (int c = 0; c < channels; ++c) {
+				auto &&channel = outputs[c];
+				for (int i = 0; i < outputSamples; ++i) {
+					channel[i] = 0;
+				}
+			}
+			return false;
+		}
 
 		struct ZeroPaddedInput {
 			Inputs &inputs;
