@@ -149,7 +149,7 @@ The algorithm has a lot of number-crunching, so Debug builds are much slower (up
 
 ### Dependencies and `#define`s
 
-This uses the [Signalsmith Linear](https://github.com/Signalsmith-Audio/linear) library for FFTs and other speedups.  There are [flags]([Linear repo](https://github.com/Signalsmith-Audio/linear?tab=readme-ov-file#building)) to enable Accelerate (`SIGNALSMITH_USE_ACCELERATE`) or IPP (`SIGNALSMITH_USE_IPP`).
+This uses the [Signalsmith Linear](https://github.com/Signalsmith-Audio/linear) library for FFTs and other speedups.  There are [flags]([Linear repo](https://github.com/Signalsmith-Audio/linear?tab=readme-ov-file#building)) to use faster FFT implementations (`SIGNALSMITH_USE_ACCELERATE`/`SIGNALSMITH_USE_IPP`/`SIGNALSMITH_USE_PFFFT`/`SIGNALSMITH_USE_PFFFT_DOUBLE`), and corresponding CMake options.
 
 ## License
 
