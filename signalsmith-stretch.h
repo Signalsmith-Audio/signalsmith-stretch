@@ -965,20 +965,27 @@ private:
 
 			freqEstimate = freqToBand(formantBaseFreq);
 			if (formantBaseFreq <= 0) freqEstimate = estimateFrequency();
-
-			for (int b = 0; b < bands; ++b) {
-				formantMetric[b] = std::sqrt(formantMetric[b]);
-			}
 		} else if (step-- == 0) {
-			Sample slew = 1/(freqEstimate*0.5 + 1);
+			Sample decay = 1 - 1/(freqEstimate*0.5 + 1);
 			Sample e = 0;
 			for (size_t repeat = 0; repeat < 2; ++repeat) {
 				for (int b = bands - 1; b >= 0; --b) {
-					e += (formantMetric[b] - e)*slew;
+					e = std::max(formantMetric[b], e*decay);
 					formantMetric[b] = e;
 				}
 				for (int b = 0; b < bands; ++b) {
-					e += (formantMetric[b] - e)*slew;
+					e = std::max(formantMetric[b], e*decay);
+					formantMetric[b] = e;
+				}
+			}
+			decay = 1/decay;
+			for (size_t repeat = 0; repeat < 2; ++repeat) {
+				for (int b = bands - 1; b >= 0; --b) {
+					e = std::min(formantMetric[b], e*decay);
+					formantMetric[b] = e;
+				}
+				for (int b = 0; b < bands; ++b) {
+					e = std::min(formantMetric[b], e*decay);
 					formantMetric[b] = e;
 				}
 			}
@@ -1001,7 +1008,7 @@ private:
 				Sample targetE = getFormant(freqToBand(outputF));
 
 				Sample formantRatio = targetE/(inputE + Sample(1e-30));
-				Sample energyRatio = formantRatio*formantRatio;
+				Sample energyRatio = formantRatio;
 
 				for (int c = 0; c < channels; ++c) {
 					Band *bins = bandsForChannel(c);
