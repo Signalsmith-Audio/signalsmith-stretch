@@ -53,6 +53,14 @@ int main(int argc, char* argv[]) {
 		
 	However, we'll do it in separate stages to demonstrate more of the API.
 	*/
+	
+	// First, an "output seek"
+	// This is suitable for starting playback of a sample at a given playback rate:
+	auto seekSamples = stretch.outputSeekSamples(1/time);
+	stretch.outputSeek(inWav, seekSamples);
+	// At this point, the next output samples we get will correspond to the beginning of the audio file
+	
+	
 
 	stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
 
