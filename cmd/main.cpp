@@ -60,10 +60,10 @@ int main(int argc, char* argv[]) {
 	// At this point, the next output samples we get will correspond to the beginning of the audio file.
 
 	// We're going to process until *just* before the end of the audio file (so we can get a tidier end using `.flush()`.
-	int outputIndex = outputLength - stretch.outputLatency();
+	int outputIndex = outputLength - stretch.intervalSamples();
 
 	// Stretch's internal output position is slightly ahead of the output samples we get
-	int outputPos = outputLength + stretch.outputLatency();
+	int outputPos = outputIndex + stretch.outputLatency();
 	// Time-map: where do we want the input position to be at that moment?
 	int inputPos = std::round(outputPos/time);
 	// And therefore which input samples do we need to be supplying?

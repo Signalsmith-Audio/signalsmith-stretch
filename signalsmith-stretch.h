@@ -180,24 +180,6 @@ struct SignalsmithStretch {
 		int seekSamples = inputLength - surplusInput;
 		seek(inputs, seekSamples, playbackRate);
 		
-		// Awkward proxy classes to avoid copying/allocating anything
-		struct OffsetInput {
-			Inputs &inputs;
-			int offset;
-
-			struct Channel {
-				Inputs &inputs;
-				int channel;
-				int offset;
-				
-				Sample operator[](int i) {
-					return Sample(inputs[channel][i + offset]);
-				}
-			};
-			Channel operator[](int c) {
-				return {inputs, c, offset};
-			}
-		} offsetInput{inputs, seekSamples};
 		tmpBuffer.resize(outputLatency()*channels);
 		struct PreRollOutput {
 			Sample *samples;
@@ -209,6 +191,7 @@ struct SignalsmithStretch {
 		} preRollOutput{tmpBuffer.data(), outputLatency()};
 		
 		// Use the surplus input to produce pre-roll output
+		OffsetIO<Inputs> offsetInput{inputs, seekSamples};
 		process(offsetInput, surplusInput, preRollOutput, outputLatency());
 		// TODO: put the thing down, flip it and reverse it
 	}
@@ -462,9 +445,12 @@ struct SignalsmithStretch {
 		}
 	}
 
+	// Process a complete audio buffer all in one go
 	template<class Inputs, class Outputs>
 	bool exact(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
-		if (outputSamples < outputLatency()*2) {
+		Sample playbackRate = inputSamples/Sample(outputSamples);
+		auto seekLength = outputSeekLength(playbackRate);
+		if (inputSamples < seekLength) {
 			// to short for this - zero the output just to be polite
 			for (int c = 0; c < channels; ++c) {
 				auto &&channel = outputs[c];
@@ -475,61 +461,29 @@ struct SignalsmithStretch {
 			return false;
 		}
 
-		struct ZeroPaddedInput {
-			Inputs &inputs;
-			int offset, length;
-			
+		outputSeek(inputs, seekLength);
+
+		int outputIndex = outputSamples - seekLength/playbackRate;
+		OffsetIO<Inputs> offsetInput{inputs, seekLength};
+		process(offsetInput, inputSamples - seekLength, outputs, outputIndex);
+		
+		struct Zeros {
 			struct Channel {
-				ZeroPaddedInput &zpi;
-				int channel;
-				
-				Sample operator[](int i) {
-					if (zpi.offset + i < zpi.length) return zpi.inputs[channel][zpi.offset + i];
+				Sample operator[](int) {
 					return 0;
 				}
 			};
-			
-			Channel operator[](int c){
-				return {*this, c};
+			Channel operator[](int) {
+				return {};
 			}
-		} zpi{inputs, inputLatency(), inputSamples};
-		seek(inputs, inputLatency(), Sample(inputSamples)/outputSamples); // start positioned on the centre of the input
-		process(zpi, inputSamples, outputs, outputSamples);
-				
-		// Fold the first bit of the input back onto itself
-		for (int c = 0; c < channels; ++c) {
-			auto &&channel = outputs[c];
-			for (int i = 0; i < std::min<int>(outputSamples - outputLatency(), outputLatency()); ++i) {
-				channel[i + outputLatency()] -= channel[outputLatency() - 1 - i];
-			}
-		}
-		// Shuffle everything along to compensate for output latency
-		for (int c = 0; c < channels; ++c) {
-			auto &&channel = outputs[c];
-			for (int i = 0; i < outputSamples - outputLatency(); ++i) {
-				channel[i] = channel[i + outputLatency()];
-			}
-		}
+		} zeros;
+		OffsetIO<Outputs> oo{outputs, outputIndex};
+		int outputIndex2 = outputSamples - stft.defaultInterval();
+		int outputBlock = outputIndex2 - outputIndex;
+		process(zeros, outputBlock/playbackRate, oo, outputBlock);
 
-		struct OffsetOutput {
-			Outputs &outputs;
-			int offset;
-			
-			struct Channel {
-				OffsetOutput &oo;
-				int channel;
-				
-				decltype(outputs[0][0]) operator[](int i) {
-					return oo.outputs[channel][oo.offset + i];
-				}
-			};
-			
-			Channel operator[](int c){
-				return {*this, c};
-			}
-		} oo{outputs, outputSamples - outputLatency()};
-		// Get the final chunk - extra output is already folded back as part of this
-		flush(oo, outputLatency());
+		OffsetIO<Outputs> offsetOutput{outputs, outputIndex2};
+		flush(offsetOutput, outputSamples - outputIndex);
 		return true;
 	}
 
@@ -1077,6 +1031,26 @@ private:
 			}
 		}
 	}
+
+	// Proxy class to avoid copying/allocating anything
+	template<class Io>
+	struct OffsetIO {
+		Io &io;
+		int offset;
+
+		struct Channel {
+			Io &io;
+			int channel;
+			int offset;
+			
+			auto operator[](int i) -> decltype(io[0][0]) {
+				return io[channel][i + offset];
+			}
+		};
+		Channel operator[](int c) {
+			return {io, c, offset};
+		}
+	};
 };
 
 }} // namespace
