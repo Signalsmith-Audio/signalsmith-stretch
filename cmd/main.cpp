@@ -51,18 +51,36 @@ int main(int argc, char* argv[]) {
 	
 		stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
 		
-	However, we'll do it in separate stages to demonstrate more of the API.
-	*/
+	However, we'll do it in separate stages to show more of the API. */
 	
-	// First, an "output seek"
-	// This is suitable for starting playback of a sample at a given playback rate:
-	auto seekSamples = stretch.outputSeekSamples(1/time);
-	stretch.outputSeek(inWav, seekSamples);
-	// At this point, the next output samples we get will correspond to the beginning of the audio file
-	
-	
+	// First, an "output seek", where we provide a chunk of input.
+	// This is suitable for starting playback of a sample at a given playback rate.
+	auto seekLength = stretch.outputSeekLength(1/time);
+	stretch.outputSeek(inWav, seekLength);
+	// At this point, the next output samples we get will correspond to the beginning of the audio file.
 
-	stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
+	// We're going to process until *just* before the end of the audio file (so we can get a tidier end using `.flush()`.
+	int outputIndex = outputLength - stretch.outputLatency();
+
+	// Stretch's internal output position is slightly ahead of the output samples we get
+	int outputPos = outputLength + stretch.outputLatency();
+	// Time-map: where do we want the input position to be at that moment?
+	int inputPos = std::round(outputPos/time);
+	// And therefore which input samples do we need to be supplying?
+	int inputIndex = inputPos + stretch.inputLatency();
+	
+	// In this particular case, our `inputPos` will be at the end of the file
+	// and `inputIndex` will be beyond the end, so we pad with 0s to have enough input
+	inWav.resize(inputIndex);
+
+	// OK, go for it
+	inWav.offset = seekLength;
+	stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
+	
+	// And as promised, get the last bits using `.flush()`, which does some extra stuff to avoid introducing clicks.
+	outWav.offset = outputIndex;
+	stretch.flush(outWav, outputLength - outputIndex);
+	outWav.offset = 0;
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 }

@@ -37,13 +37,8 @@ struct SignalsmithStretch {
 
 	SignalsmithStretch() : randomEngine(std::random_device{}()) {}
 	SignalsmithStretch(long seed) : randomEngine(seed) {}
-	
-	int blockSamples() const {
-		return int(stft.blockSamples());
-	}
-	int intervalSamples() const {
-		return int(stft.defaultInterval());
-	}
+		
+	// The difference between the internal position (centre of a block) and the input samples you're supplying
 	int inputLatency() const {
 		return int(stft.analysisLatency());
 	}
@@ -81,7 +76,6 @@ struct SignalsmithStretch {
 		stft.reset(0.1);
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
-		tmpBuffer.resize(blockSamples + intervalSamples);
 
 		bands = int(stft.bands());
 		channelBands.assign(bands*channels, Band());
@@ -94,6 +88,18 @@ struct SignalsmithStretch {
 
 		blockProcess = {};
 		formantMetric.resize(bands + 2);
+
+		tmpBuffer.resize(std::max(outputLatency()*channels, blockSamples + intervalSamples));
+	}
+	// For querying the existing config
+	int blockSamples() const {
+		return int(stft.blockSamples());
+	}
+	int intervalSamples() const {
+		return int(stft.defaultInterval());
+	}
+	bool splitComputation() const {
+		return _splitComputation;
 	}
 
 	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
@@ -126,8 +132,9 @@ struct SignalsmithStretch {
 	void setFormantBase(Sample baseFreq=0) {
 		formantBaseFreq = baseFreq;
 	}
-
-	// Provide previous input ("pre-roll"), without affecting the speed calculation.  You should ideally feed it one block-length + one interval
+	
+	// Provide previous input ("pre-roll") to smoothly change the input location without interrupting the output.  This doesn't do any calculation, just copies intput to a buffer.
+	// You should ideally feed it `seekLength()` frames of input, unless it's directly after a `.reset()` (in which case `.outputSeek()` might be a better choice)
 	template<class Inputs>
 	void seek(Inputs &&inputs, int inputSamples, double playbackRate) {
 		tmpBuffer.resize(0);
@@ -155,7 +162,60 @@ struct SignalsmithStretch {
 		didSeek = true;
 		seekTimeFactor = (playbackRate*stft.defaultInterval() > 1) ? 1/playbackRate : stft.defaultInterval();
 	}
+	int seekLength() const {
+		return int(stft.blockSamples() + stft.defaultInterval());
+	}
 	
+	// Moves the input position *and* pre-calculates some output, so that the next samples returned from `.process()` are aligned to the beginning of the sample.
+	// The time-stretch rate is inferred from `inputLength`, so use `.outputSeekLength()` to get a correct value for that.
+	template<class Inputs>
+	void outputSeek(Inputs &&inputs, int inputLength) {
+		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
+		reset();
+		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
+		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
+		Sample playbackRate = surplusInput/Sample(outputLatency());
+
+		// Move the input position to the start of the sound
+		int seekSamples = inputLength - surplusInput;
+		seek(inputs, seekSamples, playbackRate);
+		
+		// Awkward proxy classes to avoid copying/allocating anything
+		struct OffsetInput {
+			Inputs &inputs;
+			int offset;
+
+			struct Channel {
+				Inputs &inputs;
+				int channel;
+				int offset;
+				
+				Sample operator[](int i) {
+					return Sample(inputs[channel][i + offset]);
+				}
+			};
+			Channel operator[](int c) {
+				return {inputs, c, offset};
+			}
+		} offsetInput{inputs, seekSamples};
+		tmpBuffer.resize(outputLatency()*channels);
+		struct PreRollOutput {
+			Sample *samples;
+			int length;
+			
+			Sample * operator[](int c) {
+				return samples + c*length;
+			}
+		} preRollOutput{tmpBuffer.data(), outputLatency()};
+		
+		// Use the surplus input to produce pre-roll output
+		process(offsetInput, surplusInput, preRollOutput, outputLatency());
+		// TODO: put the thing down, flip it and reverse it
+	}
+	int outputSeekLength(Sample playbackRate) const {
+		return inputLatency() + playbackRate*outputLatency();
+	}
+
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_START
@@ -383,7 +443,6 @@ struct SignalsmithStretch {
 			stft.readOutput(c, plainOutput, tmpBuffer.data());
 			auto &&outputChannel = outputs[c];
 			for (int i = 0; i < plainOutput; ++i) {
-				// TODO: plain output should be gain-
 				outputChannel[i] = tmpBuffer[i];
 			}
 			tmpBuffer.resize(foldedBackOutput);
@@ -392,7 +451,7 @@ struct SignalsmithStretch {
 				outputChannel[outputSamples - 1 - i] -= tmpBuffer[i];
 			}
 		}
-		stft.reset(0.1);
+		stft.reset(0.1f);
 
 		// Reset the phase-vocoder stuff, so the next block gets a fresh start
 		for (int c = 0; c < channels; ++c) {
