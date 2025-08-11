@@ -415,27 +415,40 @@ struct SignalsmithStretch {
 #endif
 	}
 
-	// Read the remaining output, providing no further input.  `outputSamples` should ideally be at least `.outputLatency()`
+	// Read the remaining output, providing no further input.  If `outputSamples` is more than one interval, it will compute additional blocks assuming a zero-valued input
 	template<class Outputs>
-	void flush(Outputs &&outputs, int outputSamples) {
-		int plainOutput = std::min<int>(outputSamples, int(stft.blockSamples()));
-		int foldedBackOutput = std::min<int>(outputSamples, int(stft.blockSamples()) - plainOutput);
+	void flush(Outputs &&outputs, int outputSamples, Sample playbackRate=0) {
+		struct Zeros {
+			struct Channel {
+				Sample operator[](int) {
+					return 0;
+				}
+			};
+			Channel operator[](int) {
+				return {};
+			}
+		} zeros;
+		// If we're asked for more than an interval of extra output, then zero-pad the input
+		int outputBlock = std::max<int>(0, outputSamples - stft.defaultInterval());
+		if (outputBlock > 0) process(zeros, outputBlock*playbackRate, outputs, outputBlock);
+
+		int tailSamples = outputSamples - outputBlock; // at most one interval
+		int reflectSamples = std::min<int>(tailSamples, outputSamples - tailSamples);
 		stft.finishOutput(1);
 		for (int c = 0; c < channels; ++c) {
-			tmpBuffer.resize(plainOutput);
-			stft.readOutput(c, plainOutput, tmpBuffer.data());
+			tmpBuffer.resize(tailSamples);
+			stft.readOutput(c, tailSamples, tmpBuffer.data());
 			auto &&outputChannel = outputs[c];
-			for (int i = 0; i < plainOutput; ++i) {
-				outputChannel[i] = tmpBuffer[i];
+			for (int i = 0; i < tailSamples; ++i) {
+				outputChannel[outputBlock + i] = tmpBuffer[i];
 			}
-			tmpBuffer.resize(foldedBackOutput);
-			stft.readOutput(c, plainOutput, foldedBackOutput, tmpBuffer.data());
-			for (int i = 0; i < foldedBackOutput; ++i) {
-				outputChannel[outputSamples - 1 - i] -= tmpBuffer[i];
+			tmpBuffer.resize(reflectSamples);
+			stft.readOutput(c, reflectSamples, tailSamples, tmpBuffer.data());
+			for (int i = 0; i < reflectSamples; ++i) {
+				outputChannel[outputBlock + tailSamples - 1 - i] -= tmpBuffer[i];
 			}
 		}
 		stft.reset(0.1f);
-
 		// Reset the phase-vocoder stuff, so the next block gets a fresh start
 		for (int c = 0; c < channels; ++c) {
 			auto channelBands = bandsForChannel(c);
@@ -467,23 +480,8 @@ struct SignalsmithStretch {
 		OffsetIO<Inputs> offsetInput{inputs, seekLength};
 		process(offsetInput, inputSamples - seekLength, outputs, outputIndex);
 		
-		struct Zeros {
-			struct Channel {
-				Sample operator[](int) {
-					return 0;
-				}
-			};
-			Channel operator[](int) {
-				return {};
-			}
-		} zeros;
-		OffsetIO<Outputs> oo{outputs, outputIndex};
-		int outputIndex2 = outputSamples - stft.defaultInterval();
-		int outputBlock = outputIndex2 - outputIndex;
-		process(zeros, outputBlock/playbackRate, oo, outputBlock);
-
-		OffsetIO<Outputs> offsetOutput{outputs, outputIndex2};
-		flush(offsetOutput, outputSamples - outputIndex);
+		OffsetIO<Outputs> offsetOutput{outputs, outputIndex};
+		flush(offsetOutput, outputSamples - outputIndex, playbackRate);
 		return true;
 	}
 
