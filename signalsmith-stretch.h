@@ -89,7 +89,8 @@ struct SignalsmithStretch {
 		blockProcess = {};
 		formantMetric.resize(bands + 2);
 
-		tmpBuffer.resize(std::max(outputLatency()*channels, blockSamples + intervalSamples));
+		tmpProcessBuffer.resize(blockSamples + intervalSamples);
+		tmpPreRollBuffer.resize(outputLatency()*channels);
 	}
 	// For querying the existing config
 	int blockSamples() const {
@@ -137,11 +138,11 @@ struct SignalsmithStretch {
 	// You should ideally feed it `seekLength()` frames of input, unless it's directly after a `.reset()` (in which case `.outputSeek()` might be a better choice)
 	template<class Inputs>
 	void seek(Inputs &&inputs, int inputSamples, double playbackRate) {
-		tmpBuffer.resize(0);
-		tmpBuffer.resize(stft.blockSamples() + stft.defaultInterval());
+		tmpProcessBuffer.resize(0);
+		tmpProcessBuffer.resize(stft.blockSamples() + stft.defaultInterval());
 
-		int startIndex = std::max<int>(0, inputSamples - int(tmpBuffer.size())); // start position in input
-		int padStart = int(tmpBuffer.size() + startIndex) - inputSamples; // start position in tmpBuffer
+		int startIndex = std::max<int>(0, inputSamples - int(tmpProcessBuffer.size())); // start position in input
+		int padStart = int(tmpProcessBuffer.size() + startIndex) - inputSamples; // start position in tmpProcessBuffer
 
 		Sample totalEnergy = 0;
 		for (int c = 0; c < channels; ++c) {
@@ -149,12 +150,12 @@ struct SignalsmithStretch {
 			for (int i = startIndex; i < inputSamples; ++i) {
 				Sample s = inputChannel[i];
 				totalEnergy += s*s;
-				tmpBuffer[i - startIndex + padStart] = s;
+				tmpProcessBuffer[i - startIndex + padStart] = s;
 			}
 			
-			stft.writeInput(c, tmpBuffer.size(), tmpBuffer.data());
+			stft.writeInput(c, tmpProcessBuffer.size(), tmpProcessBuffer.data());
 		}
-		stft.moveInput(tmpBuffer.size());
+		stft.moveInput(tmpProcessBuffer.size());
 		if (totalEnergy >= noiseFloor) {
 			silenceCounter = 0;
 			silenceFirst = true;
@@ -180,20 +181,26 @@ struct SignalsmithStretch {
 		int seekSamples = inputLength - surplusInput;
 		seek(inputs, seekSamples, playbackRate);
 		
-		tmpBuffer.resize(outputLatency()*channels);
-		struct PreRollOutput {
+		tmpPreRollBuffer.resize(outputLatency()*channels);
+		struct BufferOutput {
 			Sample *samples;
 			int length;
 			
 			Sample * operator[](int c) {
 				return samples + c*length;
 			}
-		} preRollOutput{tmpBuffer.data(), outputLatency()};
+		} preRollOutput{tmpPreRollBuffer.data(), outputLatency()};
 		
 		// Use the surplus input to produce pre-roll output
 		OffsetIO<Inputs> offsetInput{inputs, seekSamples};
-		process(offsetInput, surplusInput, preRollOutput, outputLatency());
-		// TODO: put the thing down, flip it and reverse it
+		process(offsetInput, surplusInput, preRollOutput, preRollOutput.length);
+		
+		// put the thing down, flip it and reverse it
+		for (auto &v : tmpPreRollBuffer) v = -v;
+		for (int c = 0; c < channels; ++c) {
+			std::reverse(preRollOutput[c], preRollOutput[c] + preRollOutput.length);
+			stft.addOutput(c, preRollOutput.length, preRollOutput[c]);
+		}
 	}
 	int outputSeekLength(Sample playbackRate) const {
 		return inputLatency() + playbackRate*outputLatency();
@@ -208,14 +215,14 @@ struct SignalsmithStretch {
 		auto copyInput = [&](int toIndex){
 
 			int length = std::min<int>(int(stft.blockSamples() + stft.defaultInterval()), toIndex - prevCopiedInput);
-			tmpBuffer.resize(length);
+			tmpProcessBuffer.resize(length);
 			int offset = toIndex - length;
 			for (int c = 0; c < channels; ++c) {
 				auto &&inputBuffer = inputs[c];
 				for (int i = 0; i < length; ++i) {
-					tmpBuffer[i] = inputBuffer[i + offset];
+					tmpProcessBuffer[i] = inputBuffer[i + offset];
 				}
-				stft.writeInput(c, length, tmpBuffer.data());
+				stft.writeInput(c, length, tmpProcessBuffer.data());
 			}
 			stft.moveInput(length);
 			prevCopiedInput = toIndex;
@@ -433,19 +440,17 @@ struct SignalsmithStretch {
 		if (outputBlock > 0) process(zeros, outputBlock*playbackRate, outputs, outputBlock);
 
 		int tailSamples = outputSamples - outputBlock; // at most one interval
-		int reflectSamples = std::min<int>(tailSamples, outputSamples - tailSamples);
+		tmpProcessBuffer.resize(tailSamples);
 		stft.finishOutput(1);
 		for (int c = 0; c < channels; ++c) {
-			tmpBuffer.resize(tailSamples);
-			stft.readOutput(c, tailSamples, tmpBuffer.data());
+			stft.readOutput(c, tailSamples, tmpProcessBuffer.data());
 			auto &&outputChannel = outputs[c];
 			for (int i = 0; i < tailSamples; ++i) {
-				outputChannel[outputBlock + i] = tmpBuffer[i];
+				outputChannel[outputBlock + i] = tmpProcessBuffer[i];
 			}
-			tmpBuffer.resize(reflectSamples);
-			stft.readOutput(c, reflectSamples, tailSamples, tmpBuffer.data());
-			for (int i = 0; i < reflectSamples; ++i) {
-				outputChannel[outputBlock + tailSamples - 1 - i] -= tmpBuffer[i];
+			stft.readOutput(c, tailSamples, tailSamples, tmpProcessBuffer.data());
+			for (int i = 0; i < tailSamples; ++i) {
+				outputChannel[outputBlock + tailSamples - 1 - i] -= tmpProcessBuffer[i];
 			}
 		}
 		stft.reset(0.1f);
@@ -516,7 +521,7 @@ private:
 	typename STFT::Input stashedInput;
 	typename STFT::Output stashedOutput;
 	
-	std::vector<Sample> tmpBuffer;
+	std::vector<Sample> tmpProcessBuffer, tmpPreRollBuffer;
 
 	int channels = 0, bands = 0;
 	int prevInputOffset = -1;
