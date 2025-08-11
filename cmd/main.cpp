@@ -19,12 +19,13 @@ int main(int argc, char* argv[]) {
 
 	std::string inputWav = args.arg<std::string>("input.wav", "16-bit WAV file");
 	std::string outputWav = args.arg<std::string>("output.wav", "output WAV file");
+	double time = args.flag<double>("time", "time-stretch factor", 1);
 	double semitones = args.flag<double>("semitones", "pitch-shift amount", 0);
 	double formants = args.flag<double>("formant", "formant-shift amount (semitones)", 0);
 	bool formantComp = args.hasFlag("formant-comp", "formant compensation");
 	double formantBase = args.flag<double>("formant-base", "formant base frequency (Hz, 0=auto)", 100);
 	double tonality = args.flag<double>("tonality", "tonality limit (Hz)", 8000);
-	double time = args.flag<double>("time", "time-stretch factor", 1);
+	double asymmetry = args.flag<double>("asymmetry", "asymmetrical STFT analysis (0-1)", 0);
 	bool splitComputation = args.hasFlag("split-computation", "distributes the computation more evenly (but higher latency)");
 	args.errorExit(); // exits on error, or with `--help`
 
@@ -42,7 +43,7 @@ int main(int argc, char* argv[]) {
 	outWav.resize(outputLength);
 
 	SignalsmithStretch stretch;
-	stretch.presetDefault(int(inWav.channels), inWav.sampleRate, splitComputation);
+	stretch.configure(int(inWav.channels), inWav.sampleRate*0.12, inWav.sampleRate*0.03, splitComputation, asymmetry);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	stretch.setFormantSemitones(formants, formantComp);
 	stretch.setFormantBase(formantBase/inWav.sampleRate);

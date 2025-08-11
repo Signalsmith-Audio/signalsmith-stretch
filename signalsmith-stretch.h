@@ -68,11 +68,12 @@ struct SignalsmithStretch {
 	}
 
 	// Manual setup
-	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false) {
+	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false, Sample asymmetry=0) {
 		_splitComputation = splitComputation;
 		channels = nChannels;
+		asymmetry *= 1 - 2.0*intervalSamples/blockSamples; // maximum asymmetry gives latency of two intervals
 		stft.configure(channels, channels, blockSamples, intervalSamples + 1);
-		stft.setInterval(intervalSamples, stft.kaiser);
+		stft.setInterval(intervalSamples, stft.kaiser, asymmetry);
 		stft.reset(0.1);
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
