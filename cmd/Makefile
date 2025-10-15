@@ -1,5 +1,13 @@
 all: out/stretch
 
+dev: out/stretch
+	./out/stretch inputs/dev.wav out/dev-2048.wav --process-chunk=2048 --semitones=4
+	./out/stretch inputs/dev.wav out/dev-512.wav --process-chunk=512 --semitones=4
+	./out/stretch inputs/dev.wav out/dev-100.wav --process-chunk=100 --semitones=4
+	./out/stretch inputs/dev.wav out/dev-2048-sc.wav --process-chunk=2048 --split-computation --semitones=4
+	./out/stretch inputs/dev.wav out/dev-512-sc.wav --process-chunk=512 --split-computation --semitones=4
+	./out/stretch inputs/dev.wav out/dev-100-sc.wav --process-chunk=100 --split-computation --semitones=4
+
 out/stretch: main.cpp ../signalsmith-stretch.h util/*.h util/*.hxx
 	mkdir -p out
 	g++ -std=c++11 -O3 -g \
@@ -26,13 +34,6 @@ examples: out/stretch
 	inputs/run-all.sh out/examples/t4- out/stretch --time=4 --asymmetry=0.5
 
 TEST_WAV ?= "inputs/voice.wav"
-
-dev: out/stretch
-	out/stretch --time=0.8 --semitones=10 $(TEST_WAV) out/shift.wav
-	out/stretch --time=0.8 --semitones=10 --formant-comp $(TEST_WAV) out/shift-fc.wav
-	out/stretch --time=0.8 --semitones=10 --formant-comp --formant=3 $(TEST_WAV) out/shift-fc-f3.wav
-	out/stretch --time=0.8 --semitones=10 --formant-comp --formant=3 --formant-base=500 $(TEST_WAV) out/shift-fc-f3-fb500.wav
-	out/stretch --time=0.8 --semitones=10 --formant-comp --formant=2 --formant-base=100 $(TEST_WAV) out/shift-fc-f2-fb100.wav
 
 clean:
 	rm -rf out

@@ -7,6 +7,9 @@ using SignalsmithStretch = signalsmith::stretch::SignalsmithStretch<float>;
 
 #include "./util/simple-args.h"
 #include "./util/wav.h"
+#include "./util/stopwatch.h"
+
+#include "plot/plot.h"
 
 int main(int argc, char* argv[]) {
 	SimpleArgs args(argc, argv);
@@ -27,6 +30,7 @@ int main(int argc, char* argv[]) {
 	double tonality = args.flag<double>("tonality", "tonality limit (Hz)", 8000);
 	double asymmetry = args.flag<double>("asymmetry", "asymmetrical STFT analysis (0-1)", 0);
 	bool splitComputation = args.hasFlag("split-computation", "distributes the computation more evenly (but higher latency)");
+	int processChunkSize = args.flag<int>("process-chunk", "process chunk size in samples", -1);
 	args.errorExit(); // exits on error, or with `--help`
 
 	std::cout << inputWav << " -> " << outputWav << "\n";
@@ -57,7 +61,9 @@ int main(int argc, char* argv[]) {
 	// First, an "output seek", where we provide a chunk of input.
 	// This is suitable for starting playback of a sample at a given playback rate.
 	auto seekLength = stretch.outputSeekLength(1/time);
+	signalsmith::Stopwatch stopwatch;
 	stretch.outputSeek(inWav, seekLength);
+	double seekTime = stopwatch.seconds(stopwatch.lap());
 	// At this point, the next output samples we get will correspond to the beginning of the audio file.
 
 	// We're going to process until *just* before the end of the audio file (so we can get a tidier end using `.flush()`.
@@ -76,7 +82,42 @@ int main(int argc, char* argv[]) {
 
 	// OK, go for it
 	inWav.offset = seekLength;
-	stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
+	if (processChunkSize <= 0) {
+		stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
+	} else {
+		signalsmith::plot::Plot2D timePlot(500, 200);
+		timePlot.x.major(0);
+		timePlot.y.major(0);
+		timePlot.y.minor(0.01*processChunkSize/inWav.sampleRate, "1%");
+		timePlot.y.minor(0.02*processChunkSize/inWav.sampleRate, "2%");
+		auto &timeLine = timePlot.line();
+		auto &timeLineSeek = timePlot.line().fillToY(0);
+		timeLine.add(inWav.offset, 0); // output seek
+		timeLineSeek.add(0, 0);
+		timeLineSeek.add(0, seekTime);
+		timeLineSeek.add(inWav.offset, seekTime);
+		timeLineSeek.add(inWav.offset, 0);
+	
+		float residue = 0.f;
+		while (inWav.offset < size_t(inputIndex)) {
+			int toProcess = std::min<int>(processChunkSize, inputIndex - inWav.offset);
+			float outputPrecise = toProcess * time + residue;
+			int outputSamples = std::round(outputPrecise);
+			residue = outputPrecise - outputSamples;
+
+			stopwatch.startLap();
+			stretch.process(inWav, toProcess, outWav, outputSamples);
+			double time = stopwatch.seconds(stopwatch.lap());
+			timeLine.add(inWav.offset, time);
+			timeLine.add(inWav.offset + toProcess, time);
+			
+			inWav.offset += toProcess;
+			outWav.offset += outputSamples;
+		}
+		
+		timeLine.add(inWav.offset, 0);
+		timePlot.write(outputWav + ".svg");
+	}
 	
 	// And as promised, get the last bits using `.flush()`, which does some extra stuff to avoid introducing clicks.
 	outWav.offset = outputIndex;
