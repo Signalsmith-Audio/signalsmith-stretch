@@ -52,14 +52,14 @@ int main(int argc, char* argv[]) {
 	stretch.setFormantSemitones(formants, formantComp);
 	stretch.setFormantBase(formantBase/inWav.sampleRate);
 
-	signalsmith::plot::Figure figure;
-	auto writeLater = figure.writeLater(outputWav + "-blocks.svg");
+	bool plotBlocks = true;
+	signalsmith::plot::Figure blocksFigure;
 	size_t plotBlockCounter = 0;
-	{
-		auto &inputPlot = figure(0, 0).plot(800, 150);
+	if (plotBlocks) {
+		auto &inputPlot = blocksFigure(0, 0).plot(800, 150);
 		inputPlot.x.major(0);
 		inputPlot.y.major(0);
-		auto &outputPlot = figure(0, 1).plot(800, 150);
+		auto &outputPlot = blocksFigure(0, 1).plot(800, 150);
 		outputPlot.x.major(0);
 		outputPlot.y.major(0);
 
@@ -156,6 +156,8 @@ int main(int argc, char* argv[]) {
 	outWav.offset = outputIndex;
 	stretch.flush(outWav, outputLength - outputIndex);
 	outWav.offset = 0;
+
+	if (plotBlocks) blocksFigure.write(outputWav + "-blocks.svg");
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 }

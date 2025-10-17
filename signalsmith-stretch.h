@@ -180,24 +180,34 @@ restoreInterval = false;
 		return int(stft.blockSamples() + stft.defaultInterval());
 	}
 	
-//int outputSeekInputLatency() const {
-//	return stft.blockSamples()*0.95;
-//}
-
 	// Moves the input position *and* pre-calculates some output, so that the next samples returned from `.process()` are aligned to the beginning of the sample.
 	// The time-stretch rate is inferred from `inputLength`, so use `.outputSeekLength()` to get a correct value for that.
 	template<class Inputs>
-	void outputSeek(Inputs &&inputs, int inputLength) {
-//LOG_EXPR(outputLatency());
-restoreInterval = stft.defaultInterval();
-//stft.setInterval(stft.blockSamples()/2);
-int newOffset = stft.defaultInterval() - 1;
-//LOG_EXPR(newOffset);
-stft.analysisOffset(newOffset);
-stft.synthesisOffset(newOffset);
+	void outputSeek(Inputs &&inputs, int inputLength, Sample firstBlockAsymmetry=0.75) {
+		if (firstBlockAsymmetry >= 0) {
+			restoreInterval = stft.defaultInterval();
+			// Warped sine window
+			
+			size_t windowOffset = stft.blockSamples()*(1 - firstBlockAsymmetry)/2;
+			stft.analysisOffset(windowOffset);
+			stft.synthesisOffset(windowOffset);
+
+			for (size_t i = 0; i < stft.blockSamples(); ++i) {
+				Sample r = (i + Sample(0.5))/stft.blockSamples();
+				// Warp as two linear segments
+				if (r < (1 - firstBlockAsymmetry)/2) {
+					r /= (1 - firstBlockAsymmetry);
+				} else {
+					r = 1 + (r - 1)/(firstBlockAsymmetry + 1);
+				}
+				auto w = (1 - std::cos(r*Sample(2*M_PI)))/2;
+				stft.analysisWindow()[i] = w;
+				stft.synthesisWindow()[i] = w;
+			}
+		}
 
 		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
-		stft.reset(0.01);
+		stft.reset(0.1);
 		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
 		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
 		Sample playbackRate = surplusInput/Sample(outputLatency());
@@ -229,8 +239,10 @@ debugAnalysisOffset = debugSynthesisOffset = 0;
 		// put the thing down, flip it and reverse it
 		for (auto &v : tmpPreRollBuffer) v = -v;
 		for (int c = 0; c < channels; ++c) {
-			std::reverse(preRollOutput[c], preRollOutput[c] + preRollOutput.length);
-			stft.addOutput(c, preRollOutput.length, preRollOutput[c]);
+			std::reverse(preRollOutput[c], preRollOutput[c] + preRollLength);
+			if (_splitComputation) stashedOutput.swap(stft.output);
+			stft.addOutput(c, preRollLength, preRollOutput[c]);
+			if (_splitComputation) stashedOutput.swap(stft.output);
 		}
 	}
 	int outputSeekLength(Sample playbackRate) const {
@@ -787,7 +799,6 @@ private:
 		}
 		// Preliminary output prediction from phase-vocoder
 		if (step < size_t(channels)) {
-			if (assumePreviousBlockZero) return; // TODO: remove this from the processing schedule
 			int c = int(step);
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
