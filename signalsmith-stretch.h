@@ -564,6 +564,14 @@ private:
 	bool didSeek = false;
 	Sample seekTimeFactor = 1;
 
+	bool assumePreviousBlockZero = false;
+	void clearPreviousBlock() {
+		assumePreviousBlockZero = true;
+		for (auto &b : channelBands) {
+			b.output = b.prevInput = 0;
+		}
+	}
+
 	Sample bandToFreq(Sample b) const {
 		return stft.binToFreq(b);
 	}
@@ -579,14 +587,6 @@ private:
 	std::vector<Band> channelBands;
 	Band * bandsForChannel(int channel) {
 		return channelBands.data() + channel*bands;
-	}
-
-	bool assumePreviousBlockZero = false;
-	void clearPreviousBlock() {
-		assumePreviousBlockZero = true;
-		for (auto &b : channelBands) {
-			b.output = b.prevInput = 0;
-		}
 	}
 
 	template<Complex Band::*member>
@@ -686,7 +686,7 @@ private:
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {
-//if (assumePreviousBlockZero) return;
+				if (assumePreviousBlockZero) return; // TODO: remove this from the processing schedule
 				int channel = int(step);
 				auto bins = bandsForChannel(channel);
 
@@ -741,7 +741,7 @@ private:
 		}
 		// Preliminary output prediction from phase-vocoder
 		if (step < size_t(channels)) {
-//if (assumePreviousBlockZero) return;
+			if (assumePreviousBlockZero) return; // TODO: remove this from the processing schedule
 			int c = int(step);
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);

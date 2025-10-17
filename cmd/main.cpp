@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
 			for (int i = 0; i < blockSamples; ++i) {
 				line.add(outputOffset + i + int(outWav.offset), window[i]);
 			}
-			line.marker(outputOffset + windowOffset + int(outWav.offset), window[windowOffset]);
+			line.marker(outputOffset + int(windowOffset) + int(outWav.offset), window[windowOffset]);
 
 			++plotBlockCounter;
 		};
@@ -142,7 +142,7 @@ int main(int argc, char* argv[]) {
 			stretch.process(inWav, toProcess, outWav, outputSamples);
 			double time = stopwatch.seconds(stopwatch.lap());
 			timeLine.add(outWav.offset, time);
-			timeLine.add(outWav.offset + toProcess, time);
+			timeLine.add(outWav.offset + outputSamples, time);
 			
 			inWav.offset += toProcess;
 			outWav.offset += outputSamples;
