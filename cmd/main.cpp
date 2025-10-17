@@ -52,39 +52,6 @@ int main(int argc, char* argv[]) {
 	stretch.setFormantSemitones(formants, formantComp);
 	stretch.setFormantBase(formantBase/inWav.sampleRate);
 
-	bool plotBlocks = true;
-	signalsmith::plot::Figure blocksFigure;
-	size_t plotBlockCounter = 0;
-	if (plotBlocks) {
-		auto &inputPlot = blocksFigure(0, 0).plot(800, 150);
-		inputPlot.x.major(0);
-		inputPlot.y.major(0);
-		auto &outputPlot = blocksFigure(0, 1).plot(800, 150);
-		outputPlot.x.major(0);
-		outputPlot.y.major(0);
-
-		stretch.debugAnalysis = [&](int inputOffset, const float *window, size_t windowOffset, bool isPrevious){
-			if (plotBlockCounter > 10) return;
-			int blockSamples = stretch.blockSamples();
-			auto &line = inputPlot.line(plotBlockCounter);
-			for (int i = 0; i < blockSamples; ++i) {
-				line.add(inputOffset - blockSamples + i + int(inWav.offset), window[i]);
-			}
-			line.marker(inputOffset - blockSamples + int(windowOffset) + int(inWav.offset), window[windowOffset]);
-		};
-		stretch.debugSynthesis = [&](int outputOffset, const float *window, size_t windowOffset){
-			if (plotBlockCounter > 10) return;
-			int blockSamples = stretch.blockSamples();
-			auto &line = outputPlot.line(plotBlockCounter);
-			for (int i = 0; i < blockSamples; ++i) {
-				line.add(outputOffset + i + int(outWav.offset), window[i]);
-			}
-			line.marker(outputOffset + int(windowOffset) + int(outWav.offset), window[windowOffset]);
-
-			++plotBlockCounter;
-		};
-	}
-
 	/* Since the WAV helper allows sample access like `wav[c][index]`, we could just call:
 	
 		stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
@@ -118,6 +85,7 @@ int main(int argc, char* argv[]) {
 	if (processChunkSize <= 0) {
 		stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
 	} else {
+		// Plot computation time for each chunk
 		signalsmith::plot::Plot2D timePlot(500, 200);
 		timePlot.x.major(0);
 		timePlot.y.major(0);
@@ -156,8 +124,6 @@ int main(int argc, char* argv[]) {
 	outWav.offset = outputIndex;
 	stretch.flush(outWav, outputLength - outputIndex);
 	outWav.offset = 0;
-
-	if (plotBlocks) blocksFigure.write(outputWav + "-blocks.svg");
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");
 }

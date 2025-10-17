@@ -51,9 +51,9 @@ struct SignalsmithStretch {
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
 
-		if (restoreInterval) {
-			stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
-			restoreInterval = 0;
+		if (restoreConfig.pending()) {
+			stft.setInterval(restoreConfig.interval, stft.kaiser, restoreConfig.asymmetry);
+			restoreConfig = {};
 		}
 		
 		prevInputOffset = -1;
@@ -73,18 +73,17 @@ struct SignalsmithStretch {
 		configure(nChannels, sampleRate*0.1, sampleRate*0.04, splitComputation);
 	}
 
-Sample configuredAsymmetry = 0;
-int restoreInterval = 0;
-int diffOffsetA = 0, diffOffsetS = 0;
-
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false, Sample asymmetry=0) {
 		_splitComputation = splitComputation;
 		channels = nChannels;
 		asymmetry *= 1 - 2.0*intervalSamples/blockSamples; // maximum asymmetry gives latency of two intervals
 		stft.configure(channels, channels, blockSamples, intervalSamples + 1);
-configuredAsymmetry = asymmetry;
-restoreInterval = false;
+
+		restoreConfig = {};
+		restoreConfig.interval = intervalSamples;
+		restoreConfig.asymmetry = asymmetry;
+
 		stft.setInterval(intervalSamples, stft.kaiser, asymmetry);
 		stft.reset(0.1);
 		stashedInput = stft.input;
@@ -185,24 +184,23 @@ restoreInterval = false;
 	template<class Inputs>
 	void outputSeek(Inputs &&inputs, int inputLength, Sample firstBlockAsymmetry=0.75) {
 		if (firstBlockAsymmetry >= 0) {
-			restoreInterval = stft.defaultInterval();
-			// Warped sine window
+			restoreConfig.pending = true;
+			restoreConfig.interval = stft.defaultInterval();
 			
 			size_t windowOffset = stft.blockSamples()*(1 - firstBlockAsymmetry)/2;
+			size_t windowEnd = stft.synthesisOffset() + stft.defaultInterval();
 			stft.analysisOffset(windowOffset);
 			stft.synthesisOffset(windowOffset);
 
+			// Sine window, warped as two linear segments
 			for (size_t i = 0; i < stft.blockSamples(); ++i) {
-				Sample r = (i + Sample(0.5))/stft.blockSamples();
-				// Warp as two linear segments
-				if (r < (1 - firstBlockAsymmetry)/2) {
-					r /= (1 - firstBlockAsymmetry);
+				Sample r = i + Sample(0.5);
+				if (i < windowOffset) {
+					r = r/stft.blockSamples();
 				} else {
-					r = 1 + (r - 1)/(firstBlockAsymmetry + 1);
+					r = (r - windowOffset)/(windowEnd - windowOffset);
 				}
-				auto w = (1 - std::cos(r*Sample(2*M_PI)))/2;
-				stft.analysisWindow()[i] = w;
-				stft.synthesisWindow()[i] = w;
+				stft.analysisWindow()[i] = stft.synthesisWindow()[i] = (1 - std::cos(r*Sample(2*M_PI)))/2;
 			}
 		}
 
@@ -231,10 +229,7 @@ restoreInterval = false;
 
 		// Use the surplus input to produce pre-roll output
 		OffsetIO<Inputs> offsetInput{inputs, seekSamples};
-debugAnalysisOffset = seekSamples;
-debugSynthesisOffset = -preRollLength;
 		process(offsetInput, surplusInput, preRollOutput, preRollOutput.length);
-debugAnalysisOffset = debugSynthesisOffset = 0;
 		
 		// put the thing down, flip it and reverse it
 		for (auto &v : tmpPreRollBuffer) v = -v;
@@ -248,10 +243,6 @@ debugAnalysisOffset = debugSynthesisOffset = 0;
 	int outputSeekLength(Sample playbackRate) const {
 		return inputLatency() + playbackRate*outputLatency();
 	}
-
-int debugAnalysisOffset = 0, debugSynthesisOffset = 0;
-std::function<void(int, const Sample *, size_t, bool)> debugAnalysis;
-std::function<void(int, const Sample *, size_t)> debugSynthesis;
 
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
@@ -364,7 +355,7 @@ std::function<void(int, const Sample *, size_t)> debugSynthesis;
 				
 				blockProcess.steps += stft.synthesiseSteps() + 1;
 
-				if (restoreInterval > 0) {
+				if (restoreConfig.pending > 0) {
 					blockProcess.resetInterval = true;
 					blockProcess.steps += 1 + channels; // STFT window reset then adjusting prevInput/output
 				}
@@ -383,7 +374,6 @@ std::function<void(int, const Sample *, size_t)> debugSynthesis;
 #endif
 				if (blockProcess.newSpectrum) {
 					if (blockProcess.reanalysePrev) {
-if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInterval() + debugAnalysisOffset, stft.analysisWindow(), stft.analysisOffset(), true);
 						// analyse past input
 						if (step < stft.analyseSteps()) {
 							stashedInput.swap(stft.input);
@@ -405,8 +395,6 @@ if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInte
 						}
 						step -= 1;
 					}
-
-if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOffset, stft.analysisWindow(), stft.analysisOffset(), false);
 
 					// Analyse latest (stashed) input
 					if (step < stft.analyseSteps()) {
@@ -450,7 +438,6 @@ if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOff
 				step -= 1;
 				
 				if (step < stft.synthesiseSteps()) {
-if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffset, stft.synthesisWindow(), stft.synthesisOffset());
 					stft.synthesiseStep(step);
 					continue;
 				}
@@ -459,19 +446,19 @@ if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffs
 				if (blockProcess.resetInterval) {
 					if (step-- == 0) {
 						int prevOffsetA = stft.analysisOffset(), prevOffsetS = stft.synthesisOffset();
-						stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
-						restoreInterval = 0;
-
-						diffOffsetA = int(stft.analysisOffset()) - prevOffsetA;
-						diffOffsetS = int(stft.synthesisOffset()) - prevOffsetS;
+						stft.setInterval(restoreConfig.interval, stft.kaiser, restoreConfig.asymmetry);
+						restoreConfig.pending = false;
+						
+						restoreConfig.diffOffsetA = int(stft.analysisOffset()) - prevOffsetA;
+						restoreConfig.diffOffsetS = int(stft.synthesisOffset()) - prevOffsetS;
 						continue;
 					} else if (step < size_t(channels)) {
 						int channel = int(step);
 						auto bins = bandsForChannel(channel);
-						if (diffOffsetA) { // adjust prevInput
-							Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetA*Sample(2*M_PI));
+						if (restoreConfig.diffOffsetA) { // adjust prevInput
+							Complex rot = std::polar(Sample(1), bandToFreq(0)*restoreConfig.diffOffsetA*Sample(2*M_PI));
 							Sample freqStep = bandToFreq(1) - bandToFreq(0);
-							Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetA*Sample(2*M_PI));
+							Complex rotStep = std::polar(Sample(1), freqStep*restoreConfig.diffOffsetA*Sample(2*M_PI));
 							 
 							for (int b = 0; b < bands; ++b) {
 								auto &bin = bins[b];
@@ -479,10 +466,10 @@ if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffs
 								rot = _impl::mul(rot, rotStep);
 							}
 						}
-						if (diffOffsetS) {
-							Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetS*Sample(2*M_PI));
+						if (restoreConfig.diffOffsetS) { // adjust output
+							Complex rot = std::polar(Sample(1), bandToFreq(0)*restoreConfig.diffOffsetS*Sample(2*M_PI));
 							Sample freqStep = bandToFreq(1) - bandToFreq(0);
-							Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetS*Sample(2*M_PI));
+							Complex rotStep = std::polar(Sample(1), freqStep*restoreConfig.diffOffsetS*Sample(2*M_PI));
 							 
 							for (int b = 0; b < bands; ++b) {
 								auto &bin = bins[b];
@@ -616,6 +603,13 @@ private:
 	typename STFT::Output stashedOutput;
 	
 	std::vector<Sample> tmpProcessBuffer, tmpPreRollBuffer;
+	
+	struct {
+		bool pending = false;
+		Sample asymmetry = 0;
+		int interval = 0;
+		int diffOffsetA = 0, diffOffsetS = 0;
+	} restoreConfig;
 
 	int channels = 0, bands = 0;
 	int prevInputOffset = -1;
