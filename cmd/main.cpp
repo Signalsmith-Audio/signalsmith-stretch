@@ -52,6 +52,37 @@ int main(int argc, char* argv[]) {
 	stretch.setFormantSemitones(formants, formantComp);
 	stretch.setFormantBase(formantBase/inWav.sampleRate);
 
+	signalsmith::plot::Figure figure;
+	auto writeLater = figure.writeLater(outputWav + "-blocks.svg");
+	size_t plotBlockCounter = 0;
+	{
+		auto &inputPlot = figure(0, 0).plot(800, 150);
+		inputPlot.x.major(0);
+		inputPlot.y.major(0);
+		auto &outputPlot = figure(0, 1).plot(800, 150);
+		outputPlot.x.major(0);
+		outputPlot.y.major(0);
+
+		stretch.debugAnalysis = [&](int inputOffset, const float *window, bool isPrevious){
+			if (plotBlockCounter > 10) return;
+			int blockSamples = stretch.blockSamples();
+			auto &line = inputPlot.line(plotBlockCounter);
+			for (int i = 0; i < blockSamples; ++i) {
+				line.add(inputOffset - blockSamples + i + int(inWav.offset), window[i]);
+			}
+		};
+		stretch.debugSynthesis = [&](int outputOffset, const float *window){
+			if (plotBlockCounter > 10) return;
+			int blockSamples = stretch.blockSamples();
+			auto &line = outputPlot.line(plotBlockCounter);
+			for (int i = 0; i < blockSamples; ++i) {
+				line.add(outputOffset + i + int(outWav.offset), window[i]);
+			}
+
+			++plotBlockCounter;
+		};
+	}
+
 	/* Since the WAV helper allows sample access like `wav[c][index]`, we could just call:
 	
 		stretch.exact(inWav, int(inputLength), outWav, int(outputLength));
@@ -82,7 +113,7 @@ int main(int argc, char* argv[]) {
 
 	// OK, go for it
 	inWav.offset = seekLength;
-	if (processChunkSize <= 0) {
+	if (true || processChunkSize <= 0) {
 		stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
 	} else {
 		signalsmith::plot::Plot2D timePlot(500, 200);
@@ -92,7 +123,7 @@ int main(int argc, char* argv[]) {
 		timePlot.y.minor(0.02*processChunkSize/inWav.sampleRate, "2%");
 		auto &timeLine = timePlot.line();
 		auto &timeLineSeek = timePlot.line().fillToY(0);
-		timeLine.add(inWav.offset, 0); // output seek
+		timeLine.add(outWav.offset, 0); // output seek
 		timeLineSeek.add(0, 0);
 		timeLineSeek.add(0, seekTime);
 		timeLineSeek.add(inWav.offset, seekTime);
@@ -108,14 +139,14 @@ int main(int argc, char* argv[]) {
 			stopwatch.startLap();
 			stretch.process(inWav, toProcess, outWav, outputSamples);
 			double time = stopwatch.seconds(stopwatch.lap());
-			timeLine.add(inWav.offset, time);
-			timeLine.add(inWav.offset + toProcess, time);
+			timeLine.add(outWav.offset, time);
+			timeLine.add(outWav.offset + toProcess, time);
 			
 			inWav.offset += toProcess;
 			outWav.offset += outputSamples;
 		}
 		
-		timeLine.add(inWav.offset, 0);
+		timeLine.add(outWav.offset, 0);
 		timePlot.write(outputWav + ".svg");
 	}
 	

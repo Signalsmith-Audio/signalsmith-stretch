@@ -50,6 +50,12 @@ struct SignalsmithStretch {
 		stft.reset(0.1);
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
+
+skipPreviousBlock = true;
+if (restoreInterval) {
+	stft.setInterval(stft.defaultInterval(), stft.kaiser, configuredAsymmetry);
+	restoreInterval = false;
+}
 		
 		prevInputOffset = -1;
 		channelBands.assign(channelBands.size(), Band());
@@ -67,12 +73,17 @@ struct SignalsmithStretch {
 		configure(nChannels, sampleRate*0.1, sampleRate*0.04, splitComputation);
 	}
 
+Sample configuredAsymmetry = 0;
+bool restoreInterval = false;
+
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false, Sample asymmetry=0) {
 		_splitComputation = splitComputation;
 		channels = nChannels;
 		asymmetry *= 1 - 2.0*intervalSamples/blockSamples; // maximum asymmetry gives latency of two intervals
 		stft.configure(channels, channels, blockSamples, intervalSamples + 1);
+configuredAsymmetry = asymmetry;
+restoreInterval = false;
 		stft.setInterval(intervalSamples, stft.kaiser, asymmetry);
 		stft.reset(0.1);
 		stashedInput = stft.input;
@@ -168,21 +179,41 @@ struct SignalsmithStretch {
 		return int(stft.blockSamples() + stft.defaultInterval());
 	}
 	
+bool skipPreviousBlock = false;
+	
+//int outputSeekInputLatency() const {
+//	return stft.blockSamples()*0.95;
+//}
+
 	// Moves the input position *and* pre-calculates some output, so that the next samples returned from `.process()` are aligned to the beginning of the sample.
 	// The time-stretch rate is inferred from `inputLength`, so use `.outputSeekLength()` to get a correct value for that.
 	template<class Inputs>
 	void outputSeek(Inputs &&inputs, int inputLength) {
+//LOG_EXPR(outputLatency());
+//restoreInterval = true;
+//int newOffset = stft.blockSamples() - outputSeekInputLatency();
+//LOG_EXPR(newOffset);
+//stft.analysisOffset(newOffset);
+//stft.synthesisOffset(newOffset);
+
+skipPreviousBlock = false;
+for (auto &b : channelBands) {
+	b.output = b.prevInput = 0;
+}
+
 		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
-		reset();
+		stft.reset(0.01);
 		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
 		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
+LOG_EXPR(surplusInput);
 		Sample playbackRate = surplusInput/Sample(outputLatency());
 
 		// Move the input position to the start of the sound
 		int seekSamples = inputLength - surplusInput;
 		seek(inputs, seekSamples, playbackRate);
 		
-		tmpPreRollBuffer.resize(outputLatency()*channels);
+		auto preRollLength = int(outputLatency());
+		tmpPreRollBuffer.resize(preRollLength*channels);
 		struct BufferOutput {
 			Sample *samples;
 			int length;
@@ -190,11 +221,14 @@ struct SignalsmithStretch {
 			Sample * operator[](int c) {
 				return samples + c*length;
 			}
-		} preRollOutput{tmpPreRollBuffer.data(), outputLatency()};
-		
+		} preRollOutput{tmpPreRollBuffer.data(), preRollLength};
+
 		// Use the surplus input to produce pre-roll output
 		OffsetIO<Inputs> offsetInput{inputs, seekSamples};
+debugAnalysisOffset = seekSamples;
+debugSynthesisOffset = -preRollLength;
 		process(offsetInput, surplusInput, preRollOutput, preRollOutput.length);
+debugAnalysisOffset = debugSynthesisOffset = 0;
 		
 		// put the thing down, flip it and reverse it
 		for (auto &v : tmpPreRollBuffer) v = -v;
@@ -207,6 +241,10 @@ struct SignalsmithStretch {
 		return inputLatency() + playbackRate*outputLatency();
 	}
 
+int debugAnalysisOffset = 0, debugSynthesisOffset = 0;
+std::function<void(int, const Sample *, bool)> debugAnalysis;
+std::function<void(int, const Sample *)> debugSynthesis;
+
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_START
@@ -214,7 +252,6 @@ struct SignalsmithStretch {
 #endif
 		int prevCopiedInput = 0;
 		auto copyInput = [&](int toIndex){
-
 			int length = std::min<int>(int(stft.blockSamples() + stft.defaultInterval()), toIndex - prevCopiedInput);
 			tmpProcessBuffer.resize(length);
 			int offset = toIndex - length;
@@ -302,6 +339,7 @@ struct SignalsmithStretch {
 				if (blockProcess.newSpectrum) {
 					// make sure the previous input is the correct distance in the past (give or take 1 sample)
 					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
+					if (skipPreviousBlock) blockProcess.reanalysePrev = false;
 					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
 
 					// analyse a new input
@@ -332,6 +370,7 @@ struct SignalsmithStretch {
 #endif
 				if (blockProcess.newSpectrum) {
 					if (blockProcess.reanalysePrev) {
+if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInterval() + debugAnalysisOffset, stft.analysisWindow(), true);
 						// analyse past input
 						if (step < stft.analyseSteps()) {
 							stashedInput.swap(stft.input);
@@ -353,6 +392,8 @@ struct SignalsmithStretch {
 						}
 						step -= 1;
 					}
+
+if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOffset, stft.analysisWindow(), false);
 
 					// Analyse latest (stashed) input
 					if (step < stft.analyseSteps()) {
@@ -396,10 +437,15 @@ struct SignalsmithStretch {
 				step -= 1;
 				
 				if (step < stft.synthesiseSteps()) {
+if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffset, stft.synthesisWindow());
 					stft.synthesiseStep(step);
 					continue;
 				}
 			}
+if (processToStep == blockProcess.steps && restoreInterval) {
+	stft.setInterval(stft.defaultInterval(), stft.kaiser, configuredAsymmetry);
+	restoreInterval = false;
+}
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
 			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
 #endif
@@ -455,13 +501,17 @@ struct SignalsmithStretch {
 			}
 		}
 		stft.reset(0.1f);
-		// Reset the phase-vocoder stuff, so the next block gets a fresh start
-		for (int c = 0; c < channels; ++c) {
-			auto channelBands = bandsForChannel(c);
-			for (int b = 0; b < bands; ++b) {
-				channelBands[b].prevInput = channelBands[b].output = 0;
-			}
-		}
+skipPreviousBlock = true;
+for (auto &b : channelBands) {
+	b.prevInput = b.output = 0;
+}
+//		// Reset the phase-vocoder stuff, so the next block gets a fresh start
+//		for (int c = 0; c < channels; ++c) {
+//			auto channelBands = bandsForChannel(c);
+//			for (int b = 0; b < bands; ++b) {
+//				channelBands[b].prevInput = channelBands[b].output = 0;
+//			}
+//		}
 	}
 
 	// Process a complete audio buffer all in one go
@@ -642,6 +692,7 @@ private:
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {
+if (skipPreviousBlock) return;
 				int channel = int(step);
 				auto bins = bandsForChannel(channel);
 
@@ -696,6 +747,7 @@ private:
 		}
 		// Preliminary output prediction from phase-vocoder
 		if (step < size_t(channels)) {
+if (skipPreviousBlock) return;
 			int c = int(step);
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
@@ -754,6 +806,7 @@ private:
 					auto &downBin = bins[b - 1];
 					phase += _impl::mul(downBin.output, shortVerticalTwist);
 					
+if (!skipPreviousBlock) {
 					if (b >= longVerticalStep) {
 						Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*binTimeFactor);
 						Complex longVerticalTwist = _impl::mul<true>(prediction.input, longDownInput);
@@ -761,8 +814,10 @@ private:
 						auto &longDownBin = bins[b - longVerticalStep];
 						phase += _impl::mul(longDownBin.output, longVerticalTwist);
 					}
+}
 				}
 				// Downwards vertical steps
+if (!skipPreviousBlock) {
 				if (b < bands - 1) {
 					auto &upPrediction = predictions[b + 1];
 					auto &upMapPoint = outputMap[b + 1];
@@ -785,6 +840,7 @@ private:
 						phase += _impl::mul<true>(longUpBin.output, longVerticalTwist);
 					}
 				}
+}
 
 				outputBin.output = prediction.makeOutput(phase);
 				
@@ -802,6 +858,7 @@ private:
 			}
 			return;
 		}
+skipPreviousBlock = false;
 		step -= splitMainPrediction;
 
 		if (blockProcess.newSpectrum) {
