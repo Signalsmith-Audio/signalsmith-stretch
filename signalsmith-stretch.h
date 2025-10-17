@@ -51,10 +51,10 @@ struct SignalsmithStretch {
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
 
-if (restoreInterval) {
-	stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
-	restoreInterval = 0;
-}
+		if (restoreInterval) {
+			stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
+			restoreInterval = 0;
+		}
 		
 		prevInputOffset = -1;
 		assumePreviousBlockZero = true;
@@ -75,6 +75,7 @@ if (restoreInterval) {
 
 Sample configuredAsymmetry = 0;
 int restoreInterval = 0;
+int diffOffsetA = 0, diffOffsetS = 0;
 
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false, Sample asymmetry=0) {
@@ -348,8 +349,13 @@ std::function<void(int, const Sample *, size_t)> debugSynthesis;
 
 				updateProcessSpectrumSteps();
 				blockProcess.steps += processSpectrumSteps;
-
+				
 				blockProcess.steps += stft.synthesiseSteps() + 1;
+
+				if (restoreInterval > 0) {
+					blockProcess.resetInterval = true;
+					blockProcess.steps += 1 + channels; // STFT window reset then adjusting prevInput/output
+				}
 			}
 			
 			size_t processToStep = newBlock ? blockProcess.steps : 0;
@@ -436,43 +442,47 @@ if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffs
 					stft.synthesiseStep(step);
 					continue;
 				}
+				step -= stft.synthesiseSteps();
+				
+				if (blockProcess.resetInterval) {
+					if (step-- == 0) {
+						int prevOffsetA = stft.analysisOffset(), prevOffsetS = stft.synthesisOffset();
+						stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
+						restoreInterval = 0;
+
+						diffOffsetA = int(stft.analysisOffset()) - prevOffsetA;
+						diffOffsetS = int(stft.synthesisOffset()) - prevOffsetS;
+						continue;
+					} else if (step < size_t(channels)) {
+						int channel = int(step);
+						auto bins = bandsForChannel(channel);
+						if (diffOffsetA) { // adjust prevInput
+							Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetA*Sample(2*M_PI));
+							Sample freqStep = bandToFreq(1) - bandToFreq(0);
+							Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetA*Sample(2*M_PI));
+							 
+							for (int b = 0; b < bands; ++b) {
+								auto &bin = bins[b];
+								bin.prevInput = _impl::mul(bin.prevInput, rot);
+								rot = _impl::mul(rot, rotStep);
+							}
+						}
+						if (diffOffsetS) {
+							Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetS*Sample(2*M_PI));
+							Sample freqStep = bandToFreq(1) - bandToFreq(0);
+							Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetS*Sample(2*M_PI));
+							 
+							for (int b = 0; b < bands; ++b) {
+								auto &bin = bins[b];
+								bin.output = _impl::mul(bin.output, rot);
+								rot = _impl::mul(rot, rotStep);
+							}
+						}
+						continue;
+					}
+					step -= channels;
+				}
 			}
-if (processToStep == blockProcess.steps && restoreInterval) {
-	int prevOffsetA = stft.analysisOffset(), prevOffsetS = stft.synthesisOffset();
-LOG_EXPR(prevOffsetA);
-LOG_EXPR(prevOffsetS);
-	stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
-	restoreInterval = 0;
-
-	int diffOffsetA = int(stft.analysisOffset()) - prevOffsetA;
-	for (int channel = 0; channel < channels; ++channel) {
-		auto bins = bandsForChannel(channel);
-
-		Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetA*Sample(2*M_PI));
-		Sample freqStep = bandToFreq(1) - bandToFreq(0);
-		Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetA*Sample(2*M_PI));
-		 
-		for (int b = 0; b < bands; ++b) {
-			auto &bin = bins[b];
-			bin.prevInput = _impl::mul(bin.prevInput, rot);
-			rot = _impl::mul(rot, rotStep);
-		}
-	}
-	int diffOffsetS = int(stft.synthesisOffset()) - prevOffsetS;
-	for (int channel = 0; channel < channels; ++channel) {
-		auto bins = bandsForChannel(channel);
-
-		Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetS*Sample(2*M_PI));
-		Sample freqStep = bandToFreq(1) - bandToFreq(0);
-		Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetS*Sample(2*M_PI));
-		 
-		for (int b = 0; b < bands; ++b) {
-			auto &bin = bins[b];
-			bin.output = _impl::mul(bin.output, rot);
-			rot = _impl::mul(rot, rotStep);
-		}
-	}
-}
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
 			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
 #endif
@@ -571,6 +581,9 @@ private:
 		bool mappedFrequencies = false;
 		bool processFormants = false;
 		Sample timeFactor;
+		
+		// If our previous block had an unusual offset/shape, reset and adjust
+		bool resetInterval = false;
 	} blockProcess;
 
 	using Complex = std::complex<Sample>;
