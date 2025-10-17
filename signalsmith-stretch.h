@@ -52,8 +52,8 @@ struct SignalsmithStretch {
 		stashedOutput = stft.output;
 
 if (restoreInterval) {
-	stft.setInterval(stft.defaultInterval(), stft.kaiser, configuredAsymmetry);
-	restoreInterval = false;
+	stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
+	restoreInterval = 0;
 }
 		
 		prevInputOffset = -1;
@@ -74,7 +74,7 @@ if (restoreInterval) {
 	}
 
 Sample configuredAsymmetry = 0;
-bool restoreInterval = false;
+int restoreInterval = 0;
 
 	// Manual setup
 	void configure(int nChannels, int blockSamples, int intervalSamples, bool splitComputation=false, Sample asymmetry=0) {
@@ -188,19 +188,20 @@ restoreInterval = false;
 	template<class Inputs>
 	void outputSeek(Inputs &&inputs, int inputLength) {
 //LOG_EXPR(outputLatency());
-//restoreInterval = true;
-//int newOffset = stft.blockSamples() - outputSeekInputLatency();
+restoreInterval = stft.defaultInterval();
+//stft.setInterval(stft.blockSamples()/2);
+int newOffset = stft.defaultInterval() - 1;
 //LOG_EXPR(newOffset);
-//stft.analysisOffset(newOffset);
-//stft.synthesisOffset(newOffset);
-
-		clearPreviousBlock();
+stft.analysisOffset(newOffset);
+stft.synthesisOffset(newOffset);
 
 		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
 		stft.reset(0.01);
 		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
 		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
 		Sample playbackRate = surplusInput/Sample(outputLatency());
+
+		if (playbackRate > 1) clearPreviousBlock();
 
 		// Move the input position to the start of the sound
 		int seekSamples = inputLength - surplusInput;
@@ -437,8 +438,40 @@ if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffs
 				}
 			}
 if (processToStep == blockProcess.steps && restoreInterval) {
-	stft.setInterval(stft.defaultInterval(), stft.kaiser, configuredAsymmetry);
-	restoreInterval = false;
+	int prevOffsetA = stft.analysisOffset(), prevOffsetS = stft.synthesisOffset();
+LOG_EXPR(prevOffsetA);
+LOG_EXPR(prevOffsetS);
+	stft.setInterval(restoreInterval, stft.kaiser, configuredAsymmetry);
+	restoreInterval = 0;
+
+	int diffOffsetA = int(stft.analysisOffset()) - prevOffsetA;
+	for (int channel = 0; channel < channels; ++channel) {
+		auto bins = bandsForChannel(channel);
+
+		Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetA*Sample(2*M_PI));
+		Sample freqStep = bandToFreq(1) - bandToFreq(0);
+		Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetA*Sample(2*M_PI));
+		 
+		for (int b = 0; b < bands; ++b) {
+			auto &bin = bins[b];
+			bin.prevInput = _impl::mul(bin.prevInput, rot);
+			rot = _impl::mul(rot, rotStep);
+		}
+	}
+	int diffOffsetS = int(stft.synthesisOffset()) - prevOffsetS;
+	for (int channel = 0; channel < channels; ++channel) {
+		auto bins = bandsForChannel(channel);
+
+		Complex rot = std::polar(Sample(1), bandToFreq(0)*diffOffsetS*Sample(2*M_PI));
+		Sample freqStep = bandToFreq(1) - bandToFreq(0);
+		Complex rotStep = std::polar(Sample(1), freqStep*diffOffsetS*Sample(2*M_PI));
+		 
+		for (int b = 0; b < bands; ++b) {
+			auto &bin = bins[b];
+			bin.output = _impl::mul(bin.output, rot);
+			rot = _impl::mul(rot, rotStep);
+		}
+	}
 }
 #ifdef SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP
 			SIGNALSMITH_STRETCH_PROFILE_PROCESS_ENDSTEP();
