@@ -63,21 +63,23 @@ int main(int argc, char* argv[]) {
 		outputPlot.x.major(0);
 		outputPlot.y.major(0);
 
-		stretch.debugAnalysis = [&](int inputOffset, const float *window, bool isPrevious){
+		stretch.debugAnalysis = [&](int inputOffset, const float *window, size_t windowOffset, bool isPrevious){
 			if (plotBlockCounter > 10) return;
 			int blockSamples = stretch.blockSamples();
 			auto &line = inputPlot.line(plotBlockCounter);
 			for (int i = 0; i < blockSamples; ++i) {
 				line.add(inputOffset - blockSamples + i + int(inWav.offset), window[i]);
 			}
+			line.marker(inputOffset - blockSamples + int(windowOffset) + int(inWav.offset), window[windowOffset]);
 		};
-		stretch.debugSynthesis = [&](int outputOffset, const float *window){
+		stretch.debugSynthesis = [&](int outputOffset, const float *window, size_t windowOffset){
 			if (plotBlockCounter > 10) return;
 			int blockSamples = stretch.blockSamples();
 			auto &line = outputPlot.line(plotBlockCounter);
 			for (int i = 0; i < blockSamples; ++i) {
 				line.add(outputOffset + i + int(outWav.offset), window[i]);
 			}
+			line.marker(outputOffset + windowOffset + int(outWav.offset), window[windowOffset]);
 
 			++plotBlockCounter;
 		};
@@ -113,7 +115,7 @@ int main(int argc, char* argv[]) {
 
 	// OK, go for it
 	inWav.offset = seekLength;
-	if (true || processChunkSize <= 0) {
+	if (processChunkSize <= 0) {
 		stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
 	} else {
 		signalsmith::plot::Plot2D timePlot(500, 200);

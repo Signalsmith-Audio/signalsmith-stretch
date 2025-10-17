@@ -51,13 +51,13 @@ struct SignalsmithStretch {
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
 
-skipPreviousBlock = true;
 if (restoreInterval) {
 	stft.setInterval(stft.defaultInterval(), stft.kaiser, configuredAsymmetry);
 	restoreInterval = false;
 }
 		
 		prevInputOffset = -1;
+		assumePreviousBlockZero = true;
 		channelBands.assign(channelBands.size(), Band());
 		silenceCounter = 0;
 		didSeek = false;
@@ -179,8 +179,6 @@ restoreInterval = false;
 		return int(stft.blockSamples() + stft.defaultInterval());
 	}
 	
-bool skipPreviousBlock = false;
-	
 //int outputSeekInputLatency() const {
 //	return stft.blockSamples()*0.95;
 //}
@@ -196,16 +194,12 @@ bool skipPreviousBlock = false;
 //stft.analysisOffset(newOffset);
 //stft.synthesisOffset(newOffset);
 
-skipPreviousBlock = false;
-for (auto &b : channelBands) {
-	b.output = b.prevInput = 0;
-}
+		clearPreviousBlock();
 
 		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
 		stft.reset(0.01);
 		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
 		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
-LOG_EXPR(surplusInput);
 		Sample playbackRate = surplusInput/Sample(outputLatency());
 
 		// Move the input position to the start of the sound
@@ -242,8 +236,8 @@ debugAnalysisOffset = debugSynthesisOffset = 0;
 	}
 
 int debugAnalysisOffset = 0, debugSynthesisOffset = 0;
-std::function<void(int, const Sample *, bool)> debugAnalysis;
-std::function<void(int, const Sample *)> debugSynthesis;
+std::function<void(int, const Sample *, size_t, bool)> debugAnalysis;
+std::function<void(int, const Sample *, size_t)> debugSynthesis;
 
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
@@ -339,7 +333,7 @@ std::function<void(int, const Sample *)> debugSynthesis;
 				if (blockProcess.newSpectrum) {
 					// make sure the previous input is the correct distance in the past (give or take 1 sample)
 					blockProcess.reanalysePrev = didSeek || std::abs(inputInterval - int(stft.defaultInterval())) > 1;
-					if (skipPreviousBlock) blockProcess.reanalysePrev = false;
+					if (assumePreviousBlockZero) blockProcess.reanalysePrev = false;
 					if (blockProcess.reanalysePrev) blockProcess.steps += stft.analyseSteps() + 1;
 
 					// analyse a new input
@@ -370,7 +364,7 @@ std::function<void(int, const Sample *)> debugSynthesis;
 #endif
 				if (blockProcess.newSpectrum) {
 					if (blockProcess.reanalysePrev) {
-if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInterval() + debugAnalysisOffset, stft.analysisWindow(), true);
+if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInterval() + debugAnalysisOffset, stft.analysisWindow(), stft.analysisOffset(), true);
 						// analyse past input
 						if (step < stft.analyseSteps()) {
 							stashedInput.swap(stft.input);
@@ -393,7 +387,7 @@ if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset - stft.defaultInte
 						step -= 1;
 					}
 
-if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOffset, stft.analysisWindow(), false);
+if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOffset, stft.analysisWindow(), stft.analysisOffset(), false);
 
 					// Analyse latest (stashed) input
 					if (step < stft.analyseSteps()) {
@@ -437,7 +431,7 @@ if (step == 0 && debugAnalysis) debugAnalysis(prevInputOffset + debugAnalysisOff
 				step -= 1;
 				
 				if (step < stft.synthesiseSteps()) {
-if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffset, stft.synthesisWindow());
+if (step == 0 && debugSynthesis) debugSynthesis(outputIndex + debugSynthesisOffset, stft.synthesisWindow(), stft.synthesisOffset());
 					stft.synthesiseStep(step);
 					continue;
 				}
@@ -501,17 +495,8 @@ if (processToStep == blockProcess.steps && restoreInterval) {
 			}
 		}
 		stft.reset(0.1f);
-skipPreviousBlock = true;
-for (auto &b : channelBands) {
-	b.prevInput = b.output = 0;
-}
-//		// Reset the phase-vocoder stuff, so the next block gets a fresh start
-//		for (int c = 0; c < channels; ++c) {
-//			auto channelBands = bandsForChannel(c);
-//			for (int b = 0; b < bands; ++b) {
-//				channelBands[b].prevInput = channelBands[b].output = 0;
-//			}
-//		}
+
+		clearPreviousBlock();
 	}
 
 	// Process a complete audio buffer all in one go
@@ -595,6 +580,15 @@ private:
 	Band * bandsForChannel(int channel) {
 		return channelBands.data() + channel*bands;
 	}
+
+	bool assumePreviousBlockZero = false;
+	void clearPreviousBlock() {
+		assumePreviousBlockZero = true;
+		for (auto &b : channelBands) {
+			b.output = b.prevInput = 0;
+		}
+	}
+
 	template<Complex Band::*member>
 	Complex getBand(int channel, int index) {
 		if (index < 0 || index >= bands) return 0;
@@ -692,7 +686,7 @@ private:
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {
-if (skipPreviousBlock) return;
+//if (assumePreviousBlockZero) return;
 				int channel = int(step);
 				auto bins = bandsForChannel(channel);
 
@@ -747,7 +741,7 @@ if (skipPreviousBlock) return;
 		}
 		// Preliminary output prediction from phase-vocoder
 		if (step < size_t(channels)) {
-if (skipPreviousBlock) return;
+//if (assumePreviousBlockZero) return;
 			int c = int(step);
 			Band *bins = bandsForChannel(c);
 			auto *predictions = predictionsForChannel(c);
@@ -806,7 +800,6 @@ if (skipPreviousBlock) return;
 					auto &downBin = bins[b - 1];
 					phase += _impl::mul(downBin.output, shortVerticalTwist);
 					
-if (!skipPreviousBlock) {
 					if (b >= longVerticalStep) {
 						Complex longDownInput = getFractional<&Band::input>(maxChannel, mapPoint.inputBin - longVerticalStep*binTimeFactor);
 						Complex longVerticalTwist = _impl::mul<true>(prediction.input, longDownInput);
@@ -814,10 +807,8 @@ if (!skipPreviousBlock) {
 						auto &longDownBin = bins[b - longVerticalStep];
 						phase += _impl::mul(longDownBin.output, longVerticalTwist);
 					}
-}
 				}
 				// Downwards vertical steps
-if (!skipPreviousBlock) {
 				if (b < bands - 1) {
 					auto &upPrediction = predictions[b + 1];
 					auto &upMapPoint = outputMap[b + 1];
@@ -840,7 +831,6 @@ if (!skipPreviousBlock) {
 						phase += _impl::mul<true>(longUpBin.output, longVerticalTwist);
 					}
 				}
-}
 
 				outputBin.output = prediction.makeOutput(phase);
 				
@@ -858,7 +848,6 @@ if (!skipPreviousBlock) {
 			}
 			return;
 		}
-skipPreviousBlock = false;
 		step -= splitMainPrediction;
 
 		if (blockProcess.newSpectrum) {
@@ -867,6 +856,7 @@ skipPreviousBlock = false;
 					bin.prevInput = bin.input;
 				}
 			}
+			assumePreviousBlockZero = false;
 		}
 	}
 	
