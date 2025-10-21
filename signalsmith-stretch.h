@@ -566,12 +566,15 @@ struct SignalsmithStretch {
 
 		outputSeek(inputs, seekLength);
 
-		int outputIndex = outputSamples - seekLength/playbackRate;
 		OffsetIO<Inputs> offsetInput{inputs, seekLength};
-		process(offsetInput, inputSamples - seekLength, outputs, outputIndex);
+		int inputMainBlock = inputSamples - seekLength;
+		int outputMainBlock = inputMainBlock/playbackRate;
+		// Ordinary process calls, as far as the input goes
+		process(offsetInput, inputMainBlock, outputs, outputMainBlock);
 		
 		OffsetIO<Outputs> offsetOutput{outputs, outputIndex};
-		flush(offsetOutput, outputSamples - outputIndex, playbackRate);
+		// We've run out of input - this gets the last chunk of output (cheaply)
+		flush(offsetOutput, outputSamples - outputMainBlock, playbackRate);
 		return true;
 	}
 
