@@ -67,23 +67,17 @@ int main(int argc, char* argv[]) {
 	// At this point, the next output samples we get will correspond to the beginning of the audio file.
 
 	// We're going to process until *just* before the end of the audio file (so we can get a tidier end using `.flush()`.
-	int outputIndex = outputLength - stretch.intervalSamples();
+	int outputMainBlockLength = outputLength - stretch.intervalSamples();
+	// And this is how much input we'll need for that
+	int inputMainBlockLength = outputMainBlockLength/time;
 
-	// Stretch's internal output position is slightly ahead of the output samples we get
-	int outputPos = outputIndex + stretch.outputLatency();
-	// Time-map: where do we want the input position to be at that moment?
-	int inputPos = std::round(outputPos/time);
-	// And therefore which input samples do we need to be supplying?
-	int inputIndex = inputPos + stretch.inputLatency();
-	
-	// In this particular case, our `inputPos` will be at the end of the file
-	// and `inputIndex` will be beyond the end, so we pad with 0s to have enough input
-	inWav.resize(inputIndex);
+	// This zero-pads the input, since we'll go past the end of it
+	inWav.resize(inputMainBlockLength + seekLength);
 
-	// OK, go for it
+	// Main block of processing
 	inWav.offset = seekLength;
 	if (processChunkSize <= 0) {
-		stretch.process(inWav, inputIndex - seekLength, outWav, outputIndex);
+		stretch.process(inWav, inputMainBlockLength, outWav, outputMainBlockLength);
 	} else {
 		// Plot computation time for each chunk
 		signalsmith::plot::Plot2D timePlot(500, 200);
@@ -100,19 +94,19 @@ int main(int argc, char* argv[]) {
 		timeLineSeek.add(inWav.offset, 0);
 	
 		float residue = 0.f;
-		while (inWav.offset < size_t(inputIndex)) {
-			int toProcess = std::min<int>(processChunkSize, inputIndex - inWav.offset);
-			float outputPrecise = toProcess * time + residue;
-			int outputSamples = std::round(outputPrecise);
-			residue = outputPrecise - outputSamples;
+		while (outWav.offset < size_t(outputMainBlockLength)) {
+			int outputSamples = std::min<int>(processChunkSize, outputMainBlockLength - outWav.offset);
+			float inputPrecise = outputSamples/time + residue;
+			int inputSamples = std::round(inputPrecise);
+			residue = inputPrecise - inputSamples;
 
 			stopwatch.startLap();
-			stretch.process(inWav, toProcess, outWav, outputSamples);
+			stretch.process(inWav, inputSamples, outWav, outputSamples);
 			double time = stopwatch.seconds(stopwatch.lap());
 			timeLine.add(outWav.offset, time);
 			timeLine.add(outWav.offset + outputSamples, time);
 			
-			inWav.offset += toProcess;
+			inWav.offset += inputSamples;
 			outWav.offset += outputSamples;
 		}
 		
@@ -121,8 +115,8 @@ int main(int argc, char* argv[]) {
 	}
 	
 	// And as promised, get the last bits using `.flush()`, which does some extra stuff to avoid introducing clicks.
-	outWav.offset = outputIndex;
-	stretch.flush(outWav, outputLength - outputIndex);
+	outWav.offset = outputMainBlockLength;
+	stretch.flush(outWav, outputLength - outputMainBlockLength);
 	outWav.offset = 0;
 
 	if (!outWav.write(outputWav).warn()) args.errorExit("failed to write WAV");

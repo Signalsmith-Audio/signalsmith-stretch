@@ -1,6 +1,6 @@
 all: out/stretch
 
-DEV_FLAGS := --semitones=4 --time=0.667
+DEV_FLAGS := --semitones=4 --time=0.667 --asymmetry=0.5
 
 dev: out/stretch
 	./out/stretch inputs/dev.wav out/dev-2048.wav --process-chunk=2048 $(DEV_FLAGS)

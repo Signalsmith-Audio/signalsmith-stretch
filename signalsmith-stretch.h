@@ -182,40 +182,46 @@ struct SignalsmithStretch {
 	// Moves the input position *and* pre-calculates some output, so that the next samples returned from `.process()` are aligned to the beginning of the sample.
 	// The time-stretch rate is inferred from `inputLength`, so use `.outputSeekLength()` to get a correct value for that.
 	template<class Inputs>
-	void outputSeek(Inputs &&inputs, int inputLength, Sample firstBlockAsymmetry=0.75) {
-		if (firstBlockAsymmetry >= 0) {
-			restoreConfig.pending = true;
-			restoreConfig.interval = stft.defaultInterval();
-			
-			size_t windowOffset = stft.blockSamples()*(1 - firstBlockAsymmetry)/2;
-			size_t windowEnd = stft.synthesisOffset() + stft.defaultInterval();
-			stft.analysisOffset(windowOffset);
-			stft.synthesisOffset(windowOffset);
+	void outputSeek(Inputs &&inputs, int inputLength, Sample firstBlockAsymmetry=0.5) {
+		restoreConfig.pending = true;
+		restoreConfig.interval = stft.defaultInterval();
 
-			// Sine window, warped as two linear segments
-			for (size_t i = 0; i < stft.blockSamples(); ++i) {
-				Sample r = i + Sample(0.5);
-				if (i < windowOffset) {
-					r = r/stft.blockSamples();
-				} else {
-					r = (r - windowOffset)/(windowEnd - windowOffset);
-				}
-				stft.analysisWindow()[i] = stft.synthesisWindow()[i] = (1 - std::cos(r*Sample(2*M_PI)))/2;
+		Sample playbackRate = std::max<int>(inputLength - inputLatency(), 0)/Sample(outputLatency());
+		
+		// Place the next (restored-window) block some time in the future
+		Sample nextBlockOutputStart = stft.defaultInterval()*firstBlockAsymmetry;
+		Sample nextBlockOutputPos = nextBlockOutputStart + stft.synthesisOffset();
+		// The initial block starts some time before time 0
+		Sample firstBlockOutputStart = nextBlockOutputStart - stft.defaultInterval();
+		// Set the initial block's window so it's centred on 0
+		// Use that as the input latency
+		size_t windowOffset = -firstBlockOutputStart;
+		size_t windowEnd = int(nextBlockOutputPos); // first block ends at centre of next block
+		stft.analysisOffset(windowOffset);
+		stft.synthesisOffset(windowOffset);
+
+		// Sine window, warped as two linear segments
+		for (size_t i = 0; i < stft.blockSamples(); ++i) {
+			Sample r = i + Sample(0.5);
+			if (i < windowOffset) {
+				r = r/windowOffset/2;
+			} else if (r < windowEnd) {
+				r = (1 + (r - windowOffset)/(windowEnd - windowOffset))/2;
+			} else {
+				r = 1;
 			}
+			stft.analysisWindow()[i] = stft.synthesisWindow()[i] = (1 - std::cos(r*Sample(2*M_PI)))/2;
 		}
 
 		// TODO: add fade-out parameter to avoid clicks, instead of doing a full reset
-		stft.reset(0.1);
-		// Assume we've been handed enough surplus input to produce `outputLatency()` samples of pre-roll
-		int surplusInput = std::max<int>(inputLength - inputLatency(), 0);
-		Sample playbackRate = surplusInput/Sample(outputLatency());
+		stft.reset(0.01);
+		clearPreviousBlock();
 
-		if (playbackRate > 1) clearPreviousBlock();
-
+		auto seekSamples = inputLatency();
 		// Move the input position to the start of the sound
-		int seekSamples = inputLength - surplusInput;
 		seek(inputs, seekSamples, playbackRate);
-		
+
+		// Enough output to reach the start of the sound
 		auto preRollLength = int(outputLatency());
 		tmpPreRollBuffer.resize(preRollLength*channels);
 		struct BufferOutput {
@@ -229,8 +235,9 @@ struct SignalsmithStretch {
 
 		// Use the surplus input to produce pre-roll output
 		OffsetIO<Inputs> offsetInput{inputs, seekSamples};
-		process(offsetInput, surplusInput, preRollOutput, preRollOutput.length);
-		
+		int preRollInputSamples = std::max<int>(inputLength - seekSamples, 0);
+		process(offsetInput, preRollInputSamples, preRollOutput, preRollLength);
+
 		// put the thing down, flip it and reverse it
 		for (auto &v : tmpPreRollBuffer) v = -v;
 		for (int c = 0; c < channels; ++c) {
