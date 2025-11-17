@@ -51,7 +51,7 @@ struct SignalsmithStretch {
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
 
-		if (restoreConfig.pending()) {
+		if (restoreConfig.pending) {
 			stft.setInterval(restoreConfig.interval, stft.kaiser, restoreConfig.asymmetry);
 			restoreConfig = {};
 		}
@@ -572,7 +572,7 @@ struct SignalsmithStretch {
 		// Ordinary process calls, as far as the input goes
 		process(offsetInput, inputMainBlock, outputs, outputMainBlock);
 		
-		OffsetIO<Outputs> offsetOutput{outputs, outputIndex};
+		OffsetIO<Outputs> offsetOutput{outputs, outputMainBlock};
 		// We've run out of input - this gets the last chunk of output (cheaply)
 		flush(offsetOutput, outputSamples - outputMainBlock, playbackRate);
 		return true;
