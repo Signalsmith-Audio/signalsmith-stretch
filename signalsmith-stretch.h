@@ -40,10 +40,10 @@ struct SignalsmithStretch {
 		
 	// The difference between the internal position (centre of a block) and the input samples you're supplying
 	int inputLatency() const {
-		return int(stft.analysisLatency());
+		return configuredInputLatency;
 	}
 	int outputLatency() const {
-		return int(stft.synthesisLatency() + _splitComputation*stft.defaultInterval());
+		return configuredOutputLatency;
 	}
 	
 	void reset() {
@@ -88,6 +88,8 @@ struct SignalsmithStretch {
 		stft.reset(0.1);
 		stashedInput = stft.input;
 		stashedOutput = stft.output;
+		configuredInputLatency = int(stft.analysisLatency());
+		configuredOutputLatency = int(stft.synthesisLatency() + _splitComputation*stft.defaultInterval());
 
 		bands = int(stft.bands());
 		channelBands.assign(bands*channels, Band());
@@ -186,7 +188,7 @@ struct SignalsmithStretch {
 		restoreConfig.pending = true;
 		restoreConfig.interval = stft.defaultInterval();
 
-		Sample playbackRate = std::max<int>(inputLength - inputLatency(), 0)/Sample(outputLatency());
+		Sample playbackRate = std::max<int>(inputLength - configuredInputLatency, 0)/Sample(configuredOutputLatency);
 		
 		// Place the next (restored-window) block some time in the future
 		Sample nextBlockOutputStart = stft.defaultInterval()*firstBlockAsymmetry;
@@ -217,7 +219,7 @@ struct SignalsmithStretch {
 		stft.reset(0.01);
 		clearPreviousBlock();
 
-		auto seekSamples = inputLatency();
+		auto seekSamples = int(stft.analysisLatency());
 		// Move the input position to the start of the sound
 		seek(inputs, seekSamples, playbackRate);
 
@@ -248,7 +250,7 @@ struct SignalsmithStretch {
 		}
 	}
 	int outputSeekLength(Sample playbackRate) const {
-		return inputLatency() + playbackRate*outputLatency();
+		return configuredInputLatency + playbackRate*configuredOutputLatency;
 	}
 
 	template<class Inputs, class Outputs>
@@ -611,6 +613,7 @@ private:
 	STFT stft;
 	typename STFT::Input stashedInput;
 	typename STFT::Output stashedOutput;
+	int configuredInputLatency = 0, configuredOutputLatency = 0;
 	
 	std::vector<Sample> tmpProcessBuffer, tmpPreRollBuffer;
 	
