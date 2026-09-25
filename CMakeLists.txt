@@ -8,7 +8,7 @@ if(NOT TARGET signalsmith-linear)
 	FetchContent_Declare(
 		signalsmith-linear
 		GIT_REPOSITORY https://github.com/Signalsmith-Audio/linear.git
-		GIT_TAG 0.3.1
+		GIT_TAG 0.6.4
 		GIT_SHALLOW ON
 	)
 	FetchContent_MakeAvailable(signalsmith-linear)
