@@ -31,6 +31,8 @@ int main(int argc, char* argv[]) {
 	double asymmetry = args.flag<double>("asymmetry", "asymmetrical STFT analysis (0-1)", 0);
 	bool splitComputation = args.hasFlag("split-computation", "distributes the computation more evenly (but higher latency)");
 	int processChunkSize = args.flag<int>("process-chunk", "process chunk size in samples", -1);
+	double blockMs = args.flag<double>("block-ms", "STFT block size", 120);
+	double overlap = args.flag<double>("overlap", "STFT overlap (2.5-)", 4);
 	args.errorExit(); // exits on error, or with `--help`
 
 	std::cout << inputWav << " -> " << outputWav << "\n";
@@ -47,10 +49,15 @@ int main(int argc, char* argv[]) {
 	outWav.resize(outputLength);
 
 	SignalsmithStretch stretch;
-	stretch.configure(int(inWav.channels), inWav.sampleRate*0.12, inWav.sampleRate*0.03, splitComputation, asymmetry);
+	auto blockSamples = inWav.sampleRate*0.001*blockMs;
+	stretch.configure(int(inWav.channels), blockSamples, blockSamples/overlap, splitComputation, asymmetry);
 	stretch.setTransposeSemitones(semitones, tonality/inWav.sampleRate);
 	stretch.setFormantSemitones(formants, formantComp);
 	stretch.setFormantBase(formantBase/inWav.sampleRate);
+	if (asymmetry > 0) {
+		size_t latency = stretch.inputLatency() + stretch.outputLatency();
+		std::cout << "latency: " << latency << " samples (" << (latency*1000.0/inWav.sampleRate) << "ms)\n";
+	}
 
 	/* Since the WAV helper allows sample access like `wav[c][index]`, we could just call:
 	
