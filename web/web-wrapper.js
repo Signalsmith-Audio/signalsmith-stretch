@@ -299,11 +299,10 @@ function registerWorkletProcessor(Module, audioNodeKey) {
 							let channelBuffer = audioBuffer[c%audioBuffer.length];
 							buffer.subarray(blockSamples).set(channelBuffer.subarray(startIndex, startIndex + count));
 						});
-						audioSamples += count;
+						inputSamples += count;
 						blockSamples += count;
-					} else { // we're already past this buffer - skip it
-						audioSamples += audioBuffer[0].length;
 					}
+					audioSamples = bufferEnd;
 					++audioBufferIndex;
 				}
 				if (blockSamples < this.bufferLength) {
